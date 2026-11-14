@@ -15,6 +15,7 @@ struct lx_timespec {
 /* lx_host.c */
 void lx_logf(const char *format, ...) __attribute__((format(printf, 1, 2)));
 void lx_log_raw(const char *text, size_t len);
+void lx_log_tee(const void *text, size_t len); /* the SD card copy only (LX_LOG_FILE) */
 
 /* lx_syscall.c */
 extern int lx_trace;
@@ -90,6 +91,11 @@ int lx_audio_open(uint32_t period, uint32_t buffers);      /* lx_audio.c */
 int lx_audio_submit(const void *pcm, uint32_t bytes);
 int lx_audio_queued(void);
 void lx_audio_close(void);
+
+/* lx_display.c */
+void lx_display_init(void);
+int lx_display_set(uint32_t handheld_height, uint32_t docked_height, uint32_t fps);
+void lx_display_get(struct lx_display *out);
 
 /* lx_vulkan.c (hosts built with VULKAN=1) */
 void *lx_vk_get_instance_proc_addr(void *instance, const char *name);

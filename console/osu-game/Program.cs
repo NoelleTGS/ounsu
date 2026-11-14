@@ -241,6 +241,8 @@ static unsafe partial class Program
         try
         {
             Log("stage 0: managed Main reached");
+            // The window's size per console mode and its frame rate, before the host makes the window.
+            Switch2Config.ApplyDisplayEarly();
             Log("stage 1: creating host");
             host = Host.GetSuitableDesktopHost(@"osu", new HostOptions
             {

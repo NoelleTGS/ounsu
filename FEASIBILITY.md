@@ -278,3 +278,29 @@ empty and osu! never got past its database. What the runs found, in order:
   used: one small stick push gave a huge value (volume straight to 0/100%); the stick scrolls at the right stick's
   rate instead. Settings: Joy-Con mouse Off / Left / Right / Both (default Both) and a sensitivity slider.
   Side effect fixed: L/ZL/R/ZR no longer lose their hit keys just because Joy-Con 2s are attached.
+
+## 2026-11-14: resolution per console mode and 120 Hz (run 17)
+
+- **Docked looked blurry on a 1440p monitor** because the window was fixed at 1920x1080 and the system scaled it up.
+  ABI 7 adds `display_set(handheld_h, docked_h, fps)` / `display_get` (`lx/host/lx_display.c`): libounce's
+  `nwindowSetModeDimensions` (0 = the console's default: 1080p handheld, the TV output setting docked) and
+  `nwindowSetFrameRates` (0 = every refresh at the highest rate, VRR). On the user's 1440p monitor the docked window
+  is 2560x1440 and the monitor runs at **120 Hz docked too**; handheld 120 Hz. Draw 121 fps / update ~800 Hz at
+  1440p docked. User: smooth, sharp, every option works.
+- **The host never handled applet messages** before: libounce only changes the window size per mode inside
+  `appletMainLoop`, so `display_get` (called once per frame by osu-framework's window thread) pumps it (at most every
+  4 ms). An exit request is only logged for now.
+- **Swapchain recreation at a new size works** (1440p -> 4K -> 1440p -> 1080p -> 720p -> Automatic, and
+  dock/undock while running). gfx-probe's failure (2026-11-13) came from recreating at the same mismatched size while
+  holding an acquired image. lx_vk.c now (1) reports acquire's VK_SUBOPTIMAL_KHR as VK_SUCCESS, so Veldrid doesn't
+  recreate at the old size before osu-framework notices the new one, and (2) presents the held image before a
+  size-changing recreation, as in Dusklight's (Dawn) order, with no image outstanding (`LX_VK_RESIZE=pass` turns that
+  off; not needed so far). Presents return VK_SUBOPTIMAL_KHR right after a change (harmless).
+- osu-framework (`#if HBXL`): the windowed size is pinned to the host's window size instead of 1920x1080 and follows
+  `HbxlNative.Display()` every frame (SDL offscreen window resize -> Veldrid `ResizeMainWindow`); the display mode's
+  refresh rate is the host's frame rate, so the frame limiters follow 60/120.
+- Settings, Switch 2 -> Display: handheld 1080p/900p/720p, docked Automatic/4K/1440p/1080p/720p, frame rate Highest
+  or 60 fps. `Switch2Config.ApplyDisplayEarly` reads switch2.ini before the window exists, so the first swapchain
+  already has the right size.
+- `LX_LOG_FILE=<island path>` in lx-env: a copy of the whole log on the SD card (undocking cuts nxlink).
+- The ShadowCast (1080p60) captures only black at 1440p/120 Hz: use 1080p + 60 fps for captures.

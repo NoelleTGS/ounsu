@@ -5139,10 +5139,10 @@ index 967eef90f..2b4efe6f7 100644
  
 diff --git a/osu.Framework/Platform/HbxlNative.cs b/osu.Framework/Platform/HbxlNative.cs
 new file mode 100644
-index 000000000..4d8cb66a5
+index 000000000..6ae11ac09
 --- /dev/null
 +++ b/osu.Framework/Platform/HbxlNative.cs
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,35 @@
 +// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 +// See the LICENCE file in the repository root for full licence text.
 +
@@ -5160,6 +5160,21 @@ index 000000000..4d8cb66a5
 +    {
 +        [LibraryImport("hbxl", EntryPoint = "hbx_switch2_vi_window")]
 +        internal static partial IntPtr ViWindow();
++
++        [LibraryImport("hbxl", EntryPoint = "hbx_switch2_display")]
++        private static unsafe partial void hbx_switch2_display(uint* out5);
++
++        /// <summary>
++        /// The console's window now: its size in this console mode (docked or handheld), the frame rate it presents at,
++        /// and a serial that changes with any of them. Also lets the runtime handle the console's applet messages
++        /// (docking), so the window thread calls it once per frame.
++        /// </summary>
++        internal static unsafe (int Width, int Height, int FrameRate, uint Serial) Display()
++        {
++            uint* d = stackalloc uint[5];
++            hbx_switch2_display(d);
++            return ((int)d[0], (int)d[1], (int)d[3], d[4]);
++        }
 +    }
 +}
 +#endif
@@ -5179,26 +5194,27 @@ index fda59d2d0..c5bd766fd 100644
              foreach (string path in paths.Split(':'))
              {
 diff --git a/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs b/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs
-index b615f92b6..31ffb667a 100644
+index b615f92b6..60f0bbe94 100644
 --- a/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs
 +++ b/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs
-@@ -62,6 +62,15 @@ private unsafe void setupWindowing(FrameworkConfigManager config)
+@@ -62,6 +62,16 @@ private unsafe void setupWindowing(FrameworkConfigManager config)
  
              config.BindWith(FrameworkSetting.WindowedSize, sizeWindowed);
  
 +#if HBXL
-+            // HBLauncher (Switch 2): the swapchain must match the launcher's 1920x1080 vi window.
-+            // The surface reports no fixed extent, and a 1366x768 (desktop default) swapchain
-+            // presents without error but shows nothing. Pin the size, whatever framework.ini says.
-+            sizeWindowed.MinValue = new Size(1920, 1080);
-+            sizeWindowed.MaxValue = new Size(1920, 1080);
-+            sizeWindowed.Value = new Size(1920, 1080);
++            // Switch 2: the swapchain must match the console's window, whose size depends on the console mode (docked:
++            // the TV's, handheld: the screen's, or the "Switch 2" Display settings). Pin the size to it, whatever
++            // framework.ini says; followHbxlDisplay keeps it pinned when the mode changes.
++            var hbxlDisplay = HbxlNative.Display();
++            hbxlDisplaySerial = hbxlDisplay.Serial;
++            hbxlFrameRate = hbxlDisplay.FrameRate;
++            pinWindowedSize(new Size(hbxlDisplay.Width, hbxlDisplay.Height));
 +#endif
 +
              sizeWindowed.MinValueChanged += min =>
              {
                  if (min.Width < 0 || min.Height < 0)
-@@ -96,6 +105,16 @@ private unsafe void setupWindowing(FrameworkConfigManager config)
+@@ -96,6 +106,16 @@ private unsafe void setupWindowing(FrameworkConfigManager config)
  
              WindowMode.BindValueChanged(evt =>
              {
@@ -5215,7 +5231,61 @@ index b615f92b6..31ffb667a 100644
                  switch (evt.NewValue)
                  {
                      case Configuration.WindowMode.Fullscreen:
-@@ -147,10 +166,18 @@ public virtual IEnumerable<WindowMode> SupportedWindowModes
+@@ -142,15 +162,72 @@ protected set
+ 
+         public WindowMode DefaultWindowMode => RuntimeInfo.IsMobile ? Configuration.WindowMode.Fullscreen : Configuration.WindowMode.Windowed;
+ 
++#if HBXL
++        private uint hbxlDisplaySerial;
++        private static int hbxlFrameRate = 60; // static: tryFetchDisplayMode is (there is one window)
++
++        /// <summary>
++        /// Pins the windowed size to the console window's size. Min/max are moved in the order that keeps min &lt;= max.
++        /// </summary>
++        private void pinWindowedSize(Size size)
++        {
++            if (size.Width >= sizeWindowed.MaxValue.Width && size.Height >= sizeWindowed.MaxValue.Height)
++            {
++                sizeWindowed.MaxValue = size;
++                sizeWindowed.MinValue = size;
++            }
++            else
++            {
++                sizeWindowed.MinValue = size;
++                sizeWindowed.MaxValue = size;
++            }
++
++            sizeWindowed.Value = size;
++        }
++
++        /// <summary>
++        /// Once per frame on the window thread: follows the console window (docking, the Display settings). A new size
++        /// resizes the SDL window, whose resize event resizes the swapchain; a new frame rate updates the display mode,
++        /// which the frame limiters follow.
++        /// </summary>
++        private void followHbxlDisplay()
++        {
++            var d = HbxlNative.Display();
++            if (d.Serial == hbxlDisplaySerial)
++                return;
++
++            hbxlDisplaySerial = d.Serial;
++            Logger.Log($"Switch 2 window: {d.Width}x{d.Height} at {d.FrameRate} fps");
++
++            if (d.Width != sizeWindowed.Value.Width || d.Height != sizeWindowed.Value.Height)
++                pinWindowedSize(new Size(d.Width, d.Height));
++
++            if (d.FrameRate != hbxlFrameRate)
++            {
++                hbxlFrameRate = d.FrameRate;
++                var m = currentDisplayMode.Value;
++                currentDisplayMode.Value = new DisplayMode(m.Format, m.Size, m.BitsPerPixel, hbxlFrameRate, m.DisplayIndex);
++            }
++        }
++#endif
++
+         /// <inheritdoc />
+         public virtual IEnumerable<WindowMode> SupportedWindowModes
          {
              get
              {
@@ -5234,8 +5304,19 @@ index b615f92b6..31ffb667a 100644
              }
          }
  
+@@ -764,6 +841,10 @@ private static unsafe bool tryFetchDisplayMode(SDL_Window* windowHandle, WindowS
+             if (mode != null)
+             {
+                 displayMode = mode->ToDisplayMode(display.Index);
++#if HBXL
++                // SDL's offscreen driver knows no refresh rate: the frame limiters use the console window's.
++                displayMode = new DisplayMode(displayMode.Format, displayMode.Size, displayMode.BitsPerPixel, hbxlFrameRate, displayMode.DisplayIndex);
++#endif
+                 Logger.Log($"Updated display mode to {type} resolution: {mode->w}x{mode->h}@{mode->refresh_rate}, {displayMode.Format}");
+                 return true;
+             }
 diff --git a/osu.Framework/Platform/SDL3/SDL3Window.cs b/osu.Framework/Platform/SDL3/SDL3Window.cs
-index 43af122d1..1f0d985d3 100644
+index 43af122d1..75e163696 100644
 --- a/osu.Framework/Platform/SDL3/SDL3Window.cs
 +++ b/osu.Framework/Platform/SDL3/SDL3Window.cs
 @@ -94,6 +94,12 @@ public IntPtr WindowHandle
@@ -5289,6 +5370,17 @@ index 43af122d1..1f0d985d3 100644
  
              SDL_SetLogOutputFunction(&logOutput, IntPtr.Zero);
              SDL_SetEventFilter(&eventFilter, ObjectHandle.Handle);
+@@ -292,6 +307,10 @@ protected void RunFrame()
+ 
+             pollSDLEvents();
+ 
++#if HBXL
++            followHbxlDisplay();
++#endif
++
+             if (!cursorInWindow.Value)
+                 pollMouse();
+ 
 diff --git a/osu.Framework/Threading/AudioThread.cs b/osu.Framework/Threading/AudioThread.cs
 index 7b7ca5c41..f032a6e40 100644
 --- a/osu.Framework/Threading/AudioThread.cs

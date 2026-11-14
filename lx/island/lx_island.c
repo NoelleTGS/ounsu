@@ -197,6 +197,23 @@ void *lx_vi_window(void) {
     return g_host->vi_window;
 }
 
+/* The window per console mode (ABI 7). Without it, a fixed 1920x1080 window at 60 fps. */
+int lx_display_set(uint32_t handheld_height, uint32_t docked_height, uint32_t fps) {
+    return HAS(display_set) ? g_host->display_set(handheld_height, docked_height, fps) : -38 /* ENOSYS */;
+}
+
+void lx_display_get(struct lx_display *out) {
+    if (HAS(display_get)) {
+        g_host->display_get(out);
+        return;
+    }
+    out->width = 1920;
+    out->height = 1080;
+    out->docked = 0;
+    out->frame_rate = 60;
+    out->serial = 1;
+}
+
 /* ---- the fake libdl -----------------------------------------------------------------------------------------
 
    A static island has no shared libraries, but .NET and its libraries look for some by name and dlsym() their

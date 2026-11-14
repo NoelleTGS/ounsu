@@ -869,6 +869,7 @@ long lx_write(int fd, const void *buf, size_t len) {
     switch (f->kind) {
     case FD_CONSOLE: {
         if (f->host_fd == 0) return -LX_EBADF;
+        lx_log_tee(buf, len);
         ssize_t n = write(f->host_fd, buf, len);
         return n < 0 ? (long)len : n; /* a closed nxlink connection must not fail the program */
     }

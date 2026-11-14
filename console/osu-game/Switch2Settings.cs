@@ -42,6 +42,9 @@ public enum Switch2Setting
     LogGarbageCollections,
     ImportAutoCheck,
     ImportCheckInterval,
+    HandheldResolution,
+    DockedResolution,
+    FrameRate,
 }
 
 public partial class Switch2Config : IniConfigManager<Switch2Setting>
@@ -52,7 +55,23 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
     /// <summary>Joy-Con mouse choices; the index is hbxl_input_set_joymouse's side mask (bit 0 left, bit 1 right).</summary>
     public static readonly string[] JOYCON_MOUSE = { "Off", "Left Joy-Con only", "Right Joy-Con only", "Both Joy-Cons" };
 
-    protected override string Filename => "switch2.ini";
+    /// <summary>Display choices and the window height each one asks the host for (0: the console's default).</summary>
+    public static readonly string[] HANDHELD_RESOLUTION = { "1080p (native)", "900p", "720p" };
+
+    private static readonly int[] handheld_heights = { 1080, 900, 720 };
+
+    public static readonly string[] DOCKED_RESOLUTION = { "Automatic (TV output)", "2160p (4K)", "1440p", "1080p", "720p" };
+
+    private static readonly int[] docked_heights = { 0, 2160, 1440, 1080, 720 };
+
+    /// <summary>Frame rate choices and the cap each one asks the host for (0: every refresh at the highest rate).</summary>
+    public static readonly string[] FRAME_RATE = { "Highest (120 Hz where available)", "60 fps" };
+
+    private static readonly int[] frame_rates = { 0, 60 };
+
+    private const string filename = "switch2.ini";
+
+    protected override string Filename => filename;
 
     // The file only ever holds this enum's keys; unknown lines are dropped instead of becoming string settings.
     protected override bool AddMissingEntries => false;
@@ -86,6 +105,10 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
         // The import folder on the SD card (ConsoleOsuGame.importFromFolder): checked every N seconds for new files.
         SetDefault(Switch2Setting.ImportAutoCheck, true);
         SetDefault(Switch2Setting.ImportCheckInterval, 15, 5, 300);
+
+        SetDefault(Switch2Setting.HandheldResolution, HANDHELD_RESOLUTION[0]);
+        SetDefault(Switch2Setting.DockedResolution, DOCKED_RESOLUTION[0]);
+        SetDefault(Switch2Setting.FrameRate, FRAME_RATE[0]);
 
         // The audio queue and the diagnostics keep their hbxl-env lines, which are the defaults here.
         SetDefault(Switch2Setting.AudioPeriod, envInt("HBXL_AUDIO_PERIOD", 128, 64, 1024), 64, 1024);
@@ -178,11 +201,64 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
 
         GetBindable<bool>(Switch2Setting.LogGarbageCollections).BindValueChanged(e => Switch2Native.SetGcLog(e.NewValue ? gcLogMinPause : -1), true);
 
+        // The display was set before the window was made (ApplyDisplayEarly); only changes are sent from here on.
+        var handheld = GetBindable<string>(Switch2Setting.HandheldResolution);
+        var docked = GetBindable<string>(Switch2Setting.DockedResolution);
+        var frameRate = GetBindable<string>(Switch2Setting.FrameRate);
+
+        void display() => setDisplay(handheld.Value, docked.Value, frameRate.Value);
+
+        handheld.ValueChanged += _ => display();
+        docked.ValueChanged += _ => display();
+        frameRate.ValueChanged += _ => display();
+
         // Keeps the bindables (and their handlers) alive as long as the config.
-        applied = new IBindable[] { gyroButton, gyroSpeedX, gyroSpeedY, gyroInvertX, gyroInvertY, usb, mouseSpeed, joyMouse, joyMouseSpeed, period, buffers };
+        applied = new IBindable[] { gyroButton, gyroSpeedX, gyroSpeedY, gyroInvertX, gyroInvertY, usb, mouseSpeed, joyMouse, joyMouseSpeed, period, buffers, handheld, docked, frameRate };
     }
 
     private IBindable[]? applied;
+
+    private static int pick(string[] names, int[] values, string? name) => values[Math.Max(0, Array.IndexOf(names, name))];
+
+    private static void setDisplay(string? handheld, string? docked, string? frameRate) =>
+        Switch2Native.SetDisplay(pick(HANDHELD_RESOLUTION, handheld_heights, handheld), pick(DOCKED_RESOLUTION, docked_heights, docked),
+            pick(FRAME_RATE, frame_rates, frameRate));
+
+    /// <summary>
+    /// Sends the display settings to the host before the game host makes its window, so the first swapchain already has
+    /// the right size. Reads switch2.ini directly (the config manager needs the game's storage, which comes later); a
+    /// missing file or line means the default.
+    /// </summary>
+    public static void ApplyDisplayEarly()
+    {
+        string? handheld = null, docked = null, frameRate = null;
+
+        try
+        {
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu", filename);
+
+            if (File.Exists(path))
+            {
+                foreach (string line in File.ReadAllLines(path))
+                {
+                    int eq = line.IndexOf('=');
+                    if (eq < 0) continue;
+
+                    string key = line[..eq].Trim(), value = line[(eq + 1)..].Trim();
+
+                    if (key == nameof(Switch2Setting.HandheldResolution)) handheld = value;
+                    else if (key == nameof(Switch2Setting.DockedResolution)) docked = value;
+                    else if (key == nameof(Switch2Setting.FrameRate)) frameRate = value;
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Program.Log($"switch2 settings: display settings unreadable, using the defaults: {e.Message}");
+        }
+
+        setDisplay(handheld, docked, frameRate);
+    }
 
     private static string? env(string name)
     {
@@ -212,6 +288,9 @@ internal static partial class Switch2Native
     [LibraryImport("hbxl", EntryPoint = "hbxl_gc_log_set")]
     private static partial void hbxl_gc_log_set(int minPauseMs);
 
+    [LibraryImport("hbxl", EntryPoint = "hbxl_display_set")]
+    private static partial int hbxl_display_set(int handheldHeight, int dockedHeight, int fps);
+
     public static void SetGyro(int button, float speedX, float speedY, bool invertX, bool invertY) =>
         hbxl_input_set_gyro(button, speedX, speedY, invertX ? 1 : 0, invertY ? 1 : 0);
 
@@ -223,6 +302,12 @@ internal static partial class Switch2Native
     public static int SetAudioQueue(int period, int buffers) => hbxl_audio_set_queue(period, buffers);
 
     public static void SetGcLog(int minPauseMs) => hbxl_gc_log_set(minPauseMs);
+
+    public static void SetDisplay(int handheldHeight, int dockedHeight, int fps)
+    {
+        int r = hbxl_display_set(handheldHeight, dockedHeight, fps);
+        Program.Log($"switch2 settings: display handheld {handheldHeight}, docked {dockedHeight}, {fps} fps: {r}");
+    }
 #else
     public static void SetGyro(int button, float speedX, float speedY, bool invertX, bool invertY) =>
         Program.Log($"switch2 settings: gyro button {button}, speed {speedX} / {speedY}, invert {invertX} / {invertY}");
@@ -238,6 +323,9 @@ internal static partial class Switch2Native
     }
 
     public static void SetGcLog(int minPauseMs) => Program.Log($"switch2 settings: gc log {minPauseMs}");
+
+    public static void SetDisplay(int handheldHeight, int dockedHeight, int fps) =>
+        Program.Log($"switch2 settings: display handheld {handheldHeight}, docked {dockedHeight}, {fps} fps");
 #endif
 }
 
@@ -253,6 +341,7 @@ public partial class Switch2Section : SettingsSection
     {
         Children = new Drawable[]
         {
+            new DisplaySettings(config),
             new ImportSettings(config, importNow),
             new GyroSettings(config),
             new JoyConMouseSettings(config),
@@ -263,6 +352,48 @@ public partial class Switch2Section : SettingsSection
     }
 
     private static string speed(float v) => v.ToString("0.0", CultureInfo.InvariantCulture) + "x";
+
+    private partial class DisplaySettings : SettingsSubsection
+    {
+        protected override LocalisableString Header => "Display";
+
+        public DisplaySettings(Switch2Config config)
+        {
+            Children = new Drawable[]
+            {
+                new SettingsItemV2(new FormDropdown<string>
+                {
+                    Caption = "Resolution in handheld mode",
+                    HintText = "The screen is 1080p. A lower resolution is scaled up to it: less sharp, less work for the GPU.",
+                    Items = Switch2Config.HANDHELD_RESOLUTION,
+                    Current = config.GetBindable<string>(Switch2Setting.HandheldResolution),
+                })
+                {
+                    Keywords = new[] { "resolution", "handheld", "screen", "sharp", "blurry" },
+                },
+                new SettingsItemV2(new FormDropdown<string>
+                {
+                    Caption = "Resolution when docked",
+                    HintText = "Automatic renders at the console's TV output resolution (System Settings > TV Output). Anything else is scaled to that.",
+                    Items = Switch2Config.DOCKED_RESOLUTION,
+                    Current = config.GetBindable<string>(Switch2Setting.DockedResolution),
+                })
+                {
+                    Keywords = new[] { "resolution", "docked", "tv", "4k", "1440p", "sharp", "blurry" },
+                },
+                new SettingsItemV2(new FormDropdown<string>
+                {
+                    Caption = "Frame rate",
+                    HintText = "Highest runs at 120 Hz on the handheld screen (and on a TV that takes 120 Hz), with variable refresh rate. Use the Frame limiter setting (Graphics) set to VSync.",
+                    Items = Switch2Config.FRAME_RATE,
+                    Current = config.GetBindable<string>(Switch2Setting.FrameRate),
+                })
+                {
+                    Keywords = new[] { "fps", "120", "hz", "refresh", "vrr", "framerate" },
+                },
+            };
+        }
+    }
 
     private partial class ImportSettings : SettingsSubsection
     {

@@ -18,11 +18,6 @@
 #define LX_MAIN_STACK (8u << 20)
 
 /* Where "/" of the island's file system is on the SD card (set per app by the Makefile's LX_ROOT). */
-#ifndef LX_WINDOW_W
-#define LX_WINDOW_W 1920
-#define LX_WINDOW_H 1080
-#endif
-
 #ifndef LX_ROOT
 #define LX_ROOT "sdmc:/switch/lx-root"
 #endif
@@ -33,9 +28,24 @@ extern char __tdata_lma[], __tdata_lma_end[], __tls_start[], __tls_end[];
 extern const uint64_t __tls_align[];
 extern char __eh_frame_hdr_start[], __eh_frame_hdr_end[];
 
+/* LX_LOG_FILE=<island path> in lx-env: a copy of the whole log (host lines and the island's stdout/stderr) on the SD
+   card, for runs without nxlink (undocked: the dock has the ethernet port). Flushed per write, so it survives a crash. */
+static FILE *g_log_file;
+static Mutex g_log_lock;
+
+void lx_log_tee(const void *text, size_t len) {
+    if (!g_log_file) return;
+    mutexLock(&g_log_lock);
+    fwrite(text, 1, len, g_log_file);
+    fflush(g_log_file);
+    mutexUnlock(&g_log_lock);
+}
+
 void lx_log_raw(const char *text, size_t len) {
     fwrite(text, 1, len, stderr);
+    lx_log_tee(text, len);
 }
+
 
 void lx_logf(const char *format, ...) {
     char line[512];
@@ -118,6 +128,21 @@ static char **build_env(int romfs) {
     return g_env;
 }
 
+static void log_file_open(void) {
+    const char *key = "LX_LOG_FILE=";
+    for (int i = 0; i < g_nenv; i++) {
+        if (strncmp(g_env[i], key, strlen(key)) != 0) continue;
+        const char *path = g_env[i] + strlen(key);
+        if (!*path) return;
+        char host_path[512];
+        snprintf(host_path, sizeof host_path, "%s%s%s", lx_fd_root(), path[0] == '/' ? "" : "/", path);
+        mutexInit(&g_log_lock);
+        g_log_file = fopen(host_path, "w");
+        lx_logf("lx: log copy in %s%s", host_path, g_log_file ? "" : " FAILED");
+        return;
+    }
+}
+
 int main(int argc, char **argv) {
     static uint8_t random16[16];
     struct lx_host host;
@@ -142,13 +167,14 @@ int main(int argc, char **argv) {
     host.audio_queued = lx_audio_queued;
     host.audio_close = lx_audio_close;
 #ifdef LX_VULKAN
-    /* The window is 1280x720 by default. A swapchain of another size presents as VK_SUBOPTIMAL_KHR, the program
-       (Veldrid) recreates it, and a second swapchain on the console's window fails (gfx-probe, 2026-11-13). Size the
-       window once, before anything is made: 1920x1080, the handheld screen's size and osu!'s fixed window. */
+    /* The window is 1280x720 by default, and a swapchain of another size presents as VK_SUBOPTIMAL_KHR. Size it before
+       anything is made: per console mode (lx_display.c), 1920x1080 handheld and the TV's size docked, until the
+       program sets its own sizes (display_set). */
     host.vk_get_instance_proc_addr = lx_vk_get_instance_proc_addr;
     host.vi_window = nwindowGetDefault();
-    Result vrc = nwindowSetDimensions(nwindowGetDefault(), LX_WINDOW_W, LX_WINDOW_H);
-    lx_logf("lx: window %ux%u (0x%x)", LX_WINDOW_W, LX_WINDOW_H, vrc);
+    lx_display_init();
+    host.display_set = lx_display_set;
+    host.display_get = lx_display_get;
 #endif
     host.text_start = (uintptr_t)__code_start;
     host.text_end = (uintptr_t)__rodata_start;
@@ -177,6 +203,7 @@ int main(int argc, char **argv) {
     lx_fd_use_romfs(romfs);
     lx_logf("lx: island root is %s%s", lx_fd_root(), romfs ? " (+ the .nro's romfs)" : "");
     host.envp = build_env(romfs);
+    log_file_open();
     for (int i = 0; host.envp[i]; i++)
         if (!strcmp(host.envp[i], "LX_TRACE=1")) lx_trace = 1;
     if (lx_trace) lx_logf("lx: syscall trace on (LX_TRACE=1)");

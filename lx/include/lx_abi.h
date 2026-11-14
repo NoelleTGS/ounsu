@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LX_ABI_VERSION 6
+#define LX_ABI_VERSION 7
 
 /* Private syscall numbers (above Linux's range), used by the island runtime only. */
 #define LX_SYS_UNMAPSELF 0x10000 /* (base, size): unmap the calling thread's stack and end the thread */
@@ -50,6 +50,14 @@ struct lx_input {
         int32_t wheel;                                  /* the Joy-Con's stick as a wheel, summed, positive upward */
         uint32_t buttons;                               /* HidMouseButton of the newest sample (L/ZL or R/ZR: left) */
     } joymouse[2];
+};
+
+/* The console's window as the host sees it now (lx/host/lx_display.c). */
+struct lx_display {
+    uint32_t width, height; /* the window's size in this console mode: the size a swapchain should have */
+    uint32_t docked;        /* 1 on a TV (docked), 0 handheld */
+    uint32_t frame_rate;    /* presents per second the window paces at (60 or 120; 60 before the layer opens) */
+    uint32_t serial;        /* changes whenever any field above changes */
 };
 
 struct lx_host {
@@ -97,6 +105,15 @@ struct lx_host {
     int (*audio_submit)(const void *pcm, uint32_t bytes);
     int (*audio_queued)(void);
     void (*audio_close)(void);
+
+    /* Version 7. The window per console mode. display_set: the window's height handheld and docked (16:9; 0 = the
+       console's default: 1080 handheld, the TV output setting docked) and the frame rate (0 = the display's highest,
+       120 Hz where the system allows it, VRR; otherwise that many frames per second at most). Returns 0 or a libnx
+       result. A Vulkan swapchain of the old size keeps presenting (scaled) until the program recreates it.
+       display_get also handles the console's applet messages (docking changes the window size there): call it once
+       per frame from the thread that polls input. */
+    int (*display_set)(uint32_t handheld_height, uint32_t docked_height, uint32_t fps);
+    void (*display_get)(struct lx_display *out);
 };
 
 /* Exported by the island. Runs the program on the given main stack and returns its exit status when the program

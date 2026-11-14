@@ -178,7 +178,12 @@ static void *device_fn(const char *name) {
    the destroy of the "old" one that follows is swallowed. Anything else goes through (and is logged).
    Veldrid acquires an image right after creating a swapchain, so at a reuse one image is still acquired and not
    presented: the next acquire hands that image back (signalling its semaphore and fence with an empty submit)
-   instead of acquiring another one, which would run the swapchain out of images. */
+   instead of acquiring another one, which would run the swapchain out of images.
+   A recreation at another size (docking, the Display settings) goes through. Veldrid holds an acquired image at that
+   point; Dusklight (Dawn) resizes on this window with no image held, after a present. So by default the held image is
+   presented first (LX_VK_RESIZE=present; `pass` leaves Veldrid's order alone). And since the window's size changes
+   before the program has noticed, acquire's VK_SUBOPTIMAL_KHR is reported as VK_SUCCESS: the image presents (scaled)
+   and the program recreates at the size the host reports, instead of Veldrid recreating at the old size. */
 static VkSwapchainKHR g_sc;
 static int64_t g_outstanding = -1; /* acquired, not yet presented */
 static int64_t g_pending = -1;     /* to hand back on the next acquire */
@@ -206,9 +211,30 @@ static VKAPI_ATTR VkResult VKAPI_CALL lx_CreateSwapchainKHR(VkDevice device, con
         *out = g_sc;
         return VK_SUCCESS;
     }
-    if (ci->oldSwapchain != VK_NULL_HANDLE)
-        vlog("lx-vk: swapchain recreation %ux%u -> %ux%u (format %d -> %d): passed through", g_sc_extent.width,
-             g_sc_extent.height, ci->imageExtent.width, ci->imageExtent.height, (int)g_sc_format, (int)ci->imageFormat);
+    if (ci->oldSwapchain != VK_NULL_HANDLE) {
+        static int present_first = -1;
+        if (present_first < 0) {
+            const char *e = getenv("LX_VK_RESIZE");
+            present_first = !(e && strcmp(e, "pass") == 0);
+        }
+        const char *how = "";
+        VkResult pr = VK_SUCCESS;
+        if (present_first && ci->oldSwapchain == g_sc && g_outstanding >= 0 && g_queue) {
+            static PFN_vkQueuePresentKHR present;
+            static PFN_vkQueueWaitIdle wait_idle;
+            if (!present) present = (PFN_vkQueuePresentKHR)device_fn("vkQueuePresentKHR");
+            if (!wait_idle) wait_idle = (PFN_vkQueueWaitIdle)device_fn("vkQueueWaitIdle");
+            uint32_t index = (uint32_t)g_outstanding;
+            VkPresentInfoKHR pi = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, NULL, 0, NULL, 1, &g_sc, &index, NULL };
+            pr = present(g_queue, &pi);
+            wait_idle(g_queue);
+            g_outstanding = g_pending = -1;
+            how = ", held image presented first";
+        }
+        vlog("lx-vk: swapchain recreation %ux%u -> %ux%u (format %d -> %d): passed through%s (%d)", g_sc_extent.width,
+             g_sc_extent.height, ci->imageExtent.width, ci->imageExtent.height, (int)g_sc_format, (int)ci->imageFormat,
+             how, (int)pr);
+    }
     VkResult r = real(device, ci, alloc, out);
     if (r == VK_SUCCESS) {
         g_sc = *out;
@@ -252,7 +278,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL lx_AcquireNextImageKHR(VkDevice device, Vk
         return VK_SUCCESS;
     }
     VkResult r = real(device, sc, timeout, sem, fence, index);
-    if ((r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) && sc == g_sc) g_outstanding = *index;
+    if (r == VK_SUBOPTIMAL_KHR) {
+        static int logged;
+        if (!logged++) vlog("lx-vk: vkAcquireNextImageKHR -> VK_SUBOPTIMAL_KHR, reported as VK_SUCCESS (logged once)");
+        r = VK_SUCCESS;
+    }
+    if (r == VK_SUCCESS && sc == g_sc) g_outstanding = *index;
     if (r != VK_SUCCESS && g_present_errors++ < 20) vlog("lx-vk: vkAcquireNextImageKHR -> %d", (int)r);
     return r;
 }
