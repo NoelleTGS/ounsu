@@ -103,3 +103,32 @@ unmapping its own stack, pthread_cond_timedwait timing out, and the exit back to
 - The final image has no PT_TLS segment (libounce's switch.ld names its PHDRS), but `.tdata`/`.tbss` are 16-aligned
   and musl's TLS offsets match the linker's (16). The island's `.lx_init_array` was empty here; check where it lands
   once C++ constructors are in the island.
+
+## 2026-11-13: Phase 2 passed: .NET NativeAOT runs on kaiHEN (Test 2)
+
+`probes/aot-hello` (ILC object + the stock linux-musl-arm64 NativeAOT libraries, linked into an island by
+`tools/aot-island.py`) passed every stage on hardware, the first time: dispatch, GC.Collect, **195 MiB of escaping
+allocations in 57 ms with 11 gen0 collections**, 4 threads with [ThreadStatic] and GC while running, throw/catch,
+ThreadPool/Task, **a delegate marshalled to native code** (musl's qsort calling a managed comparer through the
+prebuilt thunk block), and **System.Console** (which aborted on hbxl for lack of pipe2).
+
+What it took (details in the files):
+- `lx/dotnet/lx_thunks.S` + `lx_dotnet.c`: 2040 prebuilt delegate thunks that reach their data with adrp/add, and
+  --wraps of RhAllocateThunksMapping / RhpGetThunkDataBlockAddress / RhpGetThunkStubsBlockAddress (from the
+  disassembly: managed code converts thunk<->data addresses only through these). pthread_kill suppressed, mlock ok.
+- `lx/host/lx_fd.c`: an fd table (console, /dev/null|zero|urandom, SD files and directories with the island's "/" at
+  `sdmc:/switch/<app>`, in-process pipes, /proc and /sys = ENOENT), Linux flags and errno.
+- `lx/island/island-r.ld`: `__managedcode`/`__modules`/`__unbox` with their `__start_`/`__stop_` symbols (ld only makes
+  those in a final link), and **all read-only data moved to `.data.rel.ro`**: musl and every HBLauncher-built library are
+  position-dependent, so their constant tables need load-time fixups, which libounce's `-z text` forbids in read-only
+  memory.
+- `tools/make-island.sh`: drops undefined symbols that no relocation uses (`dst`, `val`: macro debris in the runtime's
+  WriteBarriers.S.o), allows musl's `__restore` (sigreturn; never runs). `__dso_handle` is defined by the island.
+- The security-cookie fix from HBLauncher is still needed (read-only data can't be made writable).
+- Note: .NET 10 stack-allocates small non-escaping arrays; the old stage 3 never touched the GC.
+
+**Clean exit:** after the program returns, the host sets an "exiting" flag, wakes every island thread blocked in the
+host (futex waits record their address, sleeps wait on a per-thread word, pipe reads wake every 100 ms), and each one
+ends inside the host without returning to island code. A thread still running island code after 2 s would be paused
+(`svcSetThreadActivity`). Then all island memory is freed (aot-hello: 300 MiB, mostly the GC's reserved range). Result:
+"5 thread(s) ended, 0 paused".

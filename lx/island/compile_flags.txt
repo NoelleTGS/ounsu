@@ -1,0 +1,2 @@
+-I../include
+--target=aarch64-linux-musl

@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- NativeAOT go/no-go probe for HBLauncher's Linux personality (hbxl).
-       Build with ./build.sh: ILC emits an object; hbxl-build links it. -->
+  <!-- NativeAOT probe for the lx host on kaiHEN. Build with ./build.sh: ILC emits an object, tools/aot-island.py
+       links it into an island, lx/host makes the .nro. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -12,12 +12,12 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
     <StripSymbols>false</StripSymbols>
-    <!-- hbxl has no background-GC-friendly signals; keep the GC simple. -->
+    <!-- No signals (no background-GC activation); keep the GC simple. -->
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <ServerGarbageCollector>false</ServerGarbageCollector>
   </PropertyGroup>
   <ItemGroup>
-    <!-- hbxl mmap commits memory immediately, so cap what the GC reserves. -->
+    <!-- Cap what the GC reserves (heap memory backs every mapping). -->
     <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="134217728" />
     <RuntimeHostConfigurationOption Include="System.GC.RegionRange" Value="268435456" />
     <!-- Resolve libc P/Invokes at link time (no dlopen on the console). -->

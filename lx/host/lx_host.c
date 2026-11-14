@@ -17,6 +17,11 @@
 
 #define LX_MAIN_STACK (8u << 20)
 
+/* Where "/" of the island's file system is on the SD card (set per app by the Makefile's LX_ROOT). */
+#ifndef LX_ROOT
+#define LX_ROOT "sdmc:/switch/lx-root"
+#endif
+
 /* Linker symbols from libounce's switch.ld. */
 extern char __code_start[], __rodata_start[], __data_start[], __bss_end__[];
 extern char __tdata_lma[], __tdata_lma_end[], __tls_start[], __tls_end[];
@@ -107,6 +112,10 @@ int main(int argc, char **argv) {
     if (host.tls_align && host.tls_image % host.tls_align)
         lx_logf("lx: WARNING: TLS image not aligned to its alignment: musl's TLS offsets would be wrong");
 
+    lx_fd_setup_console();
+    lx_fd_init(LX_ROOT);
+    lx_logf("lx: island root is %s", lx_fd_root());
+
     void *stack = aligned_alloc(4096, LX_MAIN_STACK);
     if (!stack) {
         lx_logf("lx: no memory for the main stack");
@@ -116,11 +125,15 @@ int main(int argc, char **argv) {
 
     uint64_t t0 = lx_monotonic_ns();
     code = lx_island_main(&host, stack, LX_MAIN_STACK);
-    lx_logf("lx: program exited with status %d after %lu ms (%zu KiB still mapped)", code,
-            (unsigned long)((lx_monotonic_ns() - t0) / 1000000), lx_mem_mapped() >> 10);
+    lx_logf("lx: program exited with status %d after %lu ms", code, (unsigned long)((lx_monotonic_ns() - t0) / 1000000));
 
-    if (lx_threads_shutdown() == 0)
-        free(stack); /* a thread still running may be on memory we'd free; leak it then */
+    /* End every island thread, then give all island memory back: hbmenu (or the next program) runs in this same
+       process. A paused thread never runs again, so freeing what it used is safe. */
+    lx_threads_shutdown();
+    size_t mapped = lx_mem_mapped();
+    lx_mem_release_all();
+    free(stack);
+    lx_logf("lx: released %zu KiB of island memory", mapped >> 10);
 
     lx_logf("lx: back to hbmenu");
     socketExit();

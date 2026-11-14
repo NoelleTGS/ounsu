@@ -42,6 +42,8 @@ struct lx_thread {
     uintptr_t unmap_base;
     size_t unmap_size;
     volatile int done;
+    int32_t *volatile waiting_on; /* futex word this thread waits on (for the wake-up at exit) */
+    int32_t sleep_word;           /* sleeps wait on this, so the exit can cut them short */
     struct lx_thread *next;
 };
 
@@ -52,6 +54,7 @@ static struct lx_thread *g_threads;
 static Mutex g_threads_lock;
 static int g_next_tid = 2;
 static volatile int g_exit_status = -1;
+static volatile int g_exiting;
 
 uint32_t lx_process_core_mask(void) {
     static uint32_t mask;
@@ -64,6 +67,27 @@ uint32_t lx_process_core_mask(void) {
 
 int lx_gettid(void) {
     return t_self ? t_self->tid : 1;
+}
+
+int lx_exiting(void) {
+    return g_exiting;
+}
+
+/* Once the program has exited, any island thread that enters the host (a syscall, a wait, a sleep) ends there, never
+   returning to island code. */
+void lx_exit_check(void) {
+    if (g_exiting && t_self) lx_thread_exit(0, 0, 0);
+}
+
+void lx_sleep_ns(int64_t ns) {
+    if (ns <= 0) {
+        svcSleepThread(0);
+    } else if (t_self) {
+        svcWaitForAddress(&t_self->sleep_word, ArbitrationType_WaitIfEqual, 0, ns);
+    } else {
+        svcSleepThread(ns);
+    }
+    lx_exit_check();
 }
 
 /* Called (on musl's stack) when the start routine returns instead of calling SYS_exit. */
@@ -173,10 +197,42 @@ long lx_clone(int (*fn)(void *), void *stack, long flags, void *arg, int *ptid, 
     return t->tid;
 }
 
+/* After the program's exit: end every island thread. Threads blocked in the host (futex waits, sleeps, pipe reads,
+   polls) are woken and end inside the host; a thread still running island code after 2 s is paused for good (a
+   thread can't be ended from outside), so it can't run into the next program's memory. Returns how many were
+   paused. */
 int lx_threads_shutdown(void) {
-    int live = reap(2000);
-    if (live) lx_logf("lx: %d thread(s) still running at exit", live);
-    return live;
+    g_exiting = 1;
+    for (int waited = 0; waited < 2000; waited += 20) {
+        int live = 0;
+        mutexLock(&g_threads_lock);
+        for (struct lx_thread *t = g_threads; t; t = t->next) {
+            if (__atomic_load_n(&t->done, __ATOMIC_ACQUIRE)) continue;
+            live++;
+            int32_t *w = t->waiting_on;
+            if (w) svcSignalToAddress(w, SignalType_Signal, 0, -1);
+            __atomic_store_n(&t->sleep_word, 1, __ATOMIC_SEQ_CST);
+            svcSignalToAddress(&t->sleep_word, SignalType_Signal, 0, -1);
+        }
+        mutexUnlock(&g_threads_lock);
+        if (!live) break;
+        svcSleepThread(20000000ll);
+    }
+    int ended = 0, paused = 0;
+    mutexLock(&g_threads_lock);
+    for (struct lx_thread *t = g_threads; t; t = t->next) {
+        if (__atomic_load_n(&t->done, __ATOMIC_ACQUIRE)) {
+            ended++;
+            continue;
+        }
+        svcSetThreadActivity(t->t.handle, ThreadActivity_Paused);
+        lx_logf("lx: tid %d still running island code at exit: paused", t->tid);
+        paused++;
+    }
+    mutexUnlock(&g_threads_lock);
+    reap(0);
+    lx_logf("lx: exit: %d thread(s) ended, %d paused", ended, paused);
+    return paused;
 }
 
 long lx_futex(int32_t *uaddr, int op, int32_t val, const struct lx_timespec *timeout, int32_t *uaddr2, int32_t val3) {
@@ -195,7 +251,11 @@ long lx_futex(int32_t *uaddr, int op, int32_t val, const struct lx_timespec *tim
             }
             if (ns < 0) ns = 0;
         }
+        if (t_self) t_self->waiting_on = uaddr;
+        lx_exit_check();
         Result rc = svcWaitForAddress(uaddr, ArbitrationType_WaitIfEqual, val, ns);
+        if (t_self) t_self->waiting_on = NULL;
+        lx_exit_check();
         if (R_SUCCEEDED(rc)) return 0;
         if (rc == KERNELRESULT(TimedOut)) return -LX_ETIMEDOUT;
         if (rc == KERNELRESULT(InvalidState)) return -LX_EAGAIN; /* the value had already changed */

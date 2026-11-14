@@ -38,7 +38,18 @@ LIBGCC_EH=$("$CC" -print-file-name=libgcc_eh.a)
     "$WORK/lx_island.o" "$WORK/lx_island_asm.o" "$@" \
     -Wl,--start-group "$LIBC" "$LIBGCC" "$LIBGCC_EH" -Wl,--end-group
 
-"$OBJCOPY" --keep-global-symbol=lx_island_main "$WORK/full.o" "$OUT"
+# Undefined symbols that no relocation uses are debris (the .NET runtime's WriteBarriers.S.o lists its macro
+# parameters "dst" and "val" that way); drop them so they can't meet anything in the final link.
+READELF="$TC/bin/aarch64-linux-musl-readelf"
+RELOC_SYMS=$("$READELF" -rW "$WORK/full.o" | awk 'NF >= 5 && $1 ~ /^[0-9a-f]+$/ {print $5}' | sort -u)
+STRIP=""
+for sym in $("$NM" -u "$WORK/full.o" | awk '$1 == "U" {print $2}'); do
+    if ! printf '%s\n' "$RELOC_SYMS" | grep -qx "$sym"; then
+        STRIP="$STRIP --strip-symbol=$sym"
+        echo "make-island: dropping unused undefined symbol $sym"
+    fi
+done
+"$OBJCOPY" $STRIP --keep-global-symbol=lx_island_main "$WORK/full.o" "$OUT"
 
 # Checks: nothing undefined, one global, and no `svc` left (a raw Linux syscall would be a Horizon SVC 0).
 # Allowed: musl's weak _DYNAMIC (static TLS set-up uses it only together with a PT_DYNAMIC program header, and the
@@ -55,7 +66,10 @@ if [ "$GLOBALS" != "lx_island_main" ]; then
     echo "$GLOBALS" >&2
     exit 1
 fi
-SVC=$("$OBJDUMP" -d "$OUT" | grep -B30 -E '\ssvc\s' | grep -E '^[0-9a-f]+ <|\ssvc\s' || true)
+# Allowed: musl's signal-return trampoline __restore(_rt) (rt_sigreturn). sigaction hands it to the "kernel" as the
+# restorer, and the host's sigaction never delivers a signal, so it never runs.
+SVC=$("$OBJDUMP" -d "$OUT" | awk '/^[0-9a-f]+ <.*>:$/ {fn=$2} /\tsvc\t/ {print fn}' | sort -u |
+      grep -v -x -E '<__restore>:|<__restore_rt>:' || true)
 if [ -n "$SVC" ]; then
     echo "make-island: raw svc instructions in the island (functions shown):" >&2
     echo "$SVC" >&2

@@ -22,6 +22,9 @@ int __libc_start_main(int (*)(int, char **, char **), int, char **, void (*)(voi
 
 static const struct lx_host *g_host;
 
+/* C++ code registers its static destructors against this (normally from crtbegin.o, which the island doesn't use). */
+void *__dso_handle = &__dso_handle;
+
 #define SYS_exit 93
 #define SYS_exit_group 94
 #define SYS_gettid 178

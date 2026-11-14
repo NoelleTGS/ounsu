@@ -45,3 +45,14 @@ Expected output: `lx: host up`, the process memory and largest malloc (Phase 0's
 the program's `hello:` lines: environment, malloc, a 100 ms sleep, wall clock, random bytes, CPU count, four workers
 with `thread-local values ok`, and `hello: done, N of N checks passed`. It ends with
 `lx: program exited with status 0` and `lx: back to hbmenu`, and hbmenu should come back by itself. **Passed 2026-11-13** (2022/2022 checks).
+
+## Test 2: aot-hello (Phase 2: .NET NativeAOT on the lx host)
+
+Build: `sh probes/aot-hello/build.sh` → `probes/aot-hello/build/aot-hello.nro`. Send it with
+`nxlink -s -a 192.168.1.177 probes/aot-hello/build/aot-hello.nro`.
+
+Each stage logs `aot-hello: stage N: ...` before it runs and `stage N: ok` after it: 0 managed Main, 1 virtual and
+interface dispatch, 2 GC.Collect, 3 ~200 MiB of allocation churn, 4 threads + [ThreadStatic] + GC while they run,
+5 throw/catch, 6 ThreadPool + Task, 7 System.Console. Success ends with `RESULT: all stages passed` and
+`lx: program exited with status 0`. If it dies, the last `stage` line says where; `lx: syscall N not implemented`
+lines show what the host is missing. **Passed 2026-11-13** (all stages, plus 6b: a delegate marshalled to native code; clean exit).

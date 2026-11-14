@@ -128,3 +128,12 @@ long lx_madvise(uintptr_t addr, size_t len, int advice) {
     }
     return 0;
 }
+
+/* At exit, once no island thread can run any more: give every mapping back. */
+void lx_mem_release_all(void) {
+    mutexLock(&g_lock);
+    for (int i = 0; i < g_nblocks; i++) free((void *)g_blocks[i].base);
+    g_nblocks = 0;
+    g_mapped = 0;
+    mutexUnlock(&g_lock);
+}

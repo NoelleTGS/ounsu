@@ -31,7 +31,10 @@ default**; nxlink is only a development log channel. Never design features aroun
     addresses, threads left running at exit.
   - **Phase 1 DONE 2026-11-13** (Test 1, 2022/2022 checks on hardware): `lx/island` (musl side), `lx/host` (libounce
     .nro: syscalls, mmap, clone/futex), `tools/make-island.sh`, `probes/hello-island`. Process memory: 9152 MiB total.
-    Phase 2: aot-hello stages 0-6 (thunks: prebuilt block vs JIT API).
+  - **Phase 2 DONE 2026-11-13** (Test 2, all stages incl. delegate thunks and System.Console): `tools/aot-island.py`,
+    `lx/dotnet` (adrp-based thunk block + wraps), `lx/host/lx_fd.c`, read-only data → `.data.rel.ro` in the island,
+    clean exit (threads woken and ended in the host, memory freed). Still open: GC activation emulation (pthread_kill is
+    suppressed; a thread that never reaches a safepoint stalls the GC, as on hbxl), real memory use of the GC range.
     Phase 3: Vulkan, audout, pad/hid, bsd sockets. Phase 4: osu-game nro + SD layout + clean exit. Phase 5 (faults →
     managed exceptions) is parked: the loader never gets the exceptions.
 - HBLauncher-only material was left out of this repo on 2026-11-13: bti-probe, vfs-hosttest, the net host tests, the

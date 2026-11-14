@@ -1,0 +1,7 @@
+-D__SWITCH__
+-D__SWITCH2__
+-I/opt/devkitpro/libounce/include
+-I/opt/devkitpro/portlibs/switch2/include
+-I/opt/devkitpro/devkitA64/aarch64-none-elf/include
+-I../include
+--target=aarch64-none-elf
