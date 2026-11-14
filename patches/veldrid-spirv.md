@@ -1,0 +1,26 @@
+# veldrid-spirv (`src/native/veldrid-spirv`)
+
+Upstream: [ppy/veldrid-spirv](https://github.com/ppy/veldrid-spirv) `2026.1106.0` (`veldrid-spirv.base`), with
+SPIRV-Cross, shaderc, glslang, SPIRV-Tools and friends under `ext/`. Patch: `veldrid-spirv.diff`.
+
+osu-framework's Veldrid renderer compiles its GLSL shaders to SPIR-V at runtime (then caches them) through this native
+library. Normally it's a shared library from NuGet; the console needs it static.
+
+## Changes
+
+| File | Change |
+|---|---|
+| `CMakeLists.txt` | `LIBRARY_TYPE STATIC` |
+| `ext/*/CMakeLists.txt` | `cmake_minimum_required` raised to 3.16 (current CMake refuses the old minimums) |
+| `src/libveldrid-spirv/libveldrid-spirv.cpp` | `#include <cstdint>` (GCC 15 no longer includes it transitively) |
+
+Linking the real `-lstdc++` it needs means dropping NativeAOT's `libstdc++compat.a` (`exclude_objects` in the osu-game
+manifest). Built into `build-hbx/`.
+
+## Restoring
+
+```sh
+git -C src/native/veldrid-spirv checkout -f 039422c80c113623afd70146f2015e7824130bd6
+git -C src/native/veldrid-spirv submodule update --init --recursive
+git -C src/native/veldrid-spirv apply --whitespace=nowarn ~/osu-HBLauncher/patches/veldrid-spirv.diff
+```

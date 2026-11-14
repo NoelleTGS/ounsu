@@ -1,0 +1,20 @@
+# FFmpeg (`src/native/ffmpeg`)
+
+Upstream: [FFmpeg](https://ffmpeg.org/) tag `n7.1.1` (`ffmpeg.base`). Patch: `ffmpeg.diff` (empty: no source changes).
+
+FFmpeg decodes the music and hitsounds for mysoundlib (osu-framework PR #6002). The version matches FFmpeg.AutoGen 7.1.1.
+`tools/build-ffmpeg-hbx.sh` configures a static, **audio-only** build (decoders, demuxers and swresample osu! needs, no
+video, no programs) for the console into `build-hbx/`, and with the `desktop` argument an x86_64 shared build into
+`build-desktop/` for desktop comparison runs.
+
+As with OpenSSL, FFmpeg.AutoGen loads its libraries with dlopen; a generated table (`gen-ssl-syms.py --table ffmpeg` →
+`obj/ffmpeg_syms.c`) answers it from the static libraries.
+
+Video backgrounds would need the video decoders and swscale added to the build script.
+
+## Restoring
+
+```sh
+git -C src/native/ffmpeg checkout -f db69d06eeeab4f46da15030a80d539efb4503ca8
+sh ~/osu-HBLauncher/tools/build-ffmpeg-hbx.sh
+```

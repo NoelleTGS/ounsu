@@ -1,0 +1,2137 @@
+diff --git a/osu.Game/Beatmaps/WorkingBeatmapCache.cs b/osu.Game/Beatmaps/WorkingBeatmapCache.cs
+index 75f1bd2a07..4590d82713 100644
+--- a/osu.Game/Beatmaps/WorkingBeatmapCache.cs
++++ b/osu.Game/Beatmaps/WorkingBeatmapCache.cs
+@@ -222,6 +222,12 @@ private Texture getBackgroundFromStore(TextureStore store)
+                 }
+             }
+ 
++#if HBXL
++            // Real audio (SDL3 backend, osu-framework PR #6002) since 2026-11-09; OSU_HBXL_NO_AUDIO=1 in hbxl-env brings back
++            // the silent virtual track.
++            private static readonly bool hbxl_no_audio = System.Environment.GetEnvironmentVariable("OSU_HBXL_NO_AUDIO") == "1";
++#endif
++
+             protected override Track GetBeatmapTrack()
+             {
+                 if (string.IsNullOrEmpty(Metadata?.AudioFile))
+@@ -230,6 +236,14 @@ protected override Track GetBeatmapTrack()
+                 if (Metadata.AudioFile == virtual_track_filename)
+                     return null;
+ 
++#if HBXL
++                // Switch 2 port: BASS is stubbed (no audio yet), so a real track never loads or plays and the
++                // gameplay clock, which follows the track, stuttered and froze. A virtual track (length from the
++                // hit objects, driven by a stopwatch) plays maps silently but smoothly. Now opt-in (see above).
++                if (hbxl_no_audio)
++                    return null;
++#endif
++
+                 try
+                 {
+                     string fileStorePath = BeatmapSetInfo.GetPathForFile(Metadata.AudioFile);
+diff --git a/osu.Game/Configuration/SettingSourceAttribute.cs b/osu.Game/Configuration/SettingSourceAttribute.cs
+index ca544aa332..0c125a8f79 100644
+--- a/osu.Game/Configuration/SettingSourceAttribute.cs
++++ b/osu.Game/Configuration/SettingSourceAttribute.cs
+@@ -8,6 +8,9 @@
+ using System.Reflection;
+ using JetBrains.Annotations;
+ using osu.Framework.Bindables;
++#if HBXL
++using osu.Framework.Extensions;
++#endif
+ using osu.Framework.Extensions.ObjectExtensions;
+ using osu.Framework.Extensions.TypeExtensions;
+ using osu.Framework.Graphics;
+@@ -198,6 +201,21 @@ public static IEnumerable<Drawable> CreateSettingsControls(this object obj)
+                         break;
+ 
+                     case IBindable bindable:
++#if HBXL
++                        // Switch 2 port (NativeAOT): MakeGenericType(ModSettingsEnumDropdown<TEnum>) needs code that was never
++                        // compiled ("missing native code or metadata", crashed the mod select overlay). Use a non-generic
++                        // dropdown over boxed enum values instead.
++                        if (bindable is INotifyValueChangedUntyped untyped && bindable is IParseable parseable && untyped.ValueUntyped is Enum)
++                        {
++                            yield return new HbxlEnumSettingsDropdown(untyped, parseable)
++                            {
++                                LabelText = attr.Label,
++                                TooltipText = attr.Description,
++                            };
++
++                            break;
++                        }
++#endif
+                         var dropdownType = typeof(ModSettingsEnumDropdown<>).MakeGenericType(bindable.GetType().GetGenericArguments()[0]);
+                         var dropdown = (Drawable)Activator.CreateInstance(dropdownType)!;
+ 
+@@ -278,6 +296,62 @@ public static object GetUnderlyingSettingValue(this object setting)
+                   .OrderBy(attr => attr.Item1)
+                   .ToArray();
+ 
++#if HBXL
++        /// <summary>A boxed enum value, shown by its description.</summary>
++        private sealed class HbxlEnumItem
++        {
++            public readonly object Value;
++            private readonly string label;
++
++            public HbxlEnumItem(object value)
++            {
++                Value = value;
++                label = value.GetLocalisableDescription().ToString();
++            }
++
++            public override string ToString() => label;
++        }
++
++        /// <summary>
++        /// Non-generic equivalent of <see cref="ModSettingsEnumDropdown{T}"/> for the Switch 2 port: reads the setting through
++        /// <see cref="INotifyValueChangedUntyped"/>, writes it through <see cref="IParseable.Parse"/>, no generic instantiation at runtime.
++        /// </summary>
++        private partial class HbxlEnumSettingsDropdown : SettingsDropdown<HbxlEnumItem>
++        {
++            public HbxlEnumSettingsDropdown(INotifyValueChangedUntyped source, IParseable target)
++            {
++                Type enumType = source.ValueUntyped.GetType();
++                var items = Enum.GetValuesAsUnderlyingType(enumType)
++                                .Cast<object>()
++                                .Select(raw => new HbxlEnumItem(Enum.ToObject(enumType, raw)))
++                                .ToArray();
++
++                HbxlEnumItem find(object value) => items.FirstOrDefault(i => EqualityComparer<object>.Default.Equals(i.Value, value)) ?? items[0];
++
++                Items = items;
++                Current = new Bindable<HbxlEnumItem>(find(source.DefaultUntyped)) { Value = find(source.ValueUntyped) };
++
++                Current.BindValueChanged(e =>
++                {
++                    if (EqualityComparer<object>.Default.Equals(e.NewValue.Value, source.ValueUntyped))
++                        return;
++
++                    try
++                    {
++                        target.Parse(e.NewValue.Value, System.Globalization.CultureInfo.InvariantCulture);
++                    }
++                    catch (InvalidOperationException)
++                    {
++                        // the setting is disabled: show its actual value again
++                        Current.Value = find(source.ValueUntyped);
++                    }
++                });
++
++                source.SubscribeValueChanged(() => Schedule(() => Current.Value = find(source.ValueUntyped)));
++            }
++        }
++#endif
++
+         private partial class ModSettingsEnumDropdown<T> : SettingsEnumDropdown<T>
+             where T : struct, Enum
+         {
+diff --git a/osu.Game/Database/ImportTask.cs b/osu.Game/Database/ImportTask.cs
+index 8f2752020b..e22f1e03ba 100644
+--- a/osu.Game/Database/ImportTask.cs
++++ b/osu.Game/Database/ImportTask.cs
+@@ -49,7 +49,13 @@ public ArchiveReader GetReader()
+             if (Stream == null)
+             {
+                 if (ZipUtils.IsZipArchive(Path))
++#if HBXL
++                    // Switch 2 port: every read() is a round trip to the PC's file server. FileStream's default 4 KiB buffer made
++                    // opening a downloaded .osz take up to a minute before "Beginning import" (2026-11-09); 1 MiB reads it in a few.
++                    return new ZipArchiveReader(new FileStream(Path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20), System.IO.Path.GetFileName(Path));
++#else
+                     return new ZipArchiveReader(File.Open(Path, FileMode.Open, FileAccess.Read, FileShare.Read), System.IO.Path.GetFileName(Path));
++#endif
+                 if (Directory.Exists(Path))
+                     return new DirectoryArchiveReader(Path);
+                 if (File.Exists(Path))
+diff --git a/osu.Game/Database/ModelDownloader.cs b/osu.Game/Database/ModelDownloader.cs
+index 9eef01a7d9..83ce8511b0 100644
+--- a/osu.Game/Database/ModelDownloader.cs
++++ b/osu.Game/Database/ModelDownloader.cs
+@@ -5,6 +5,7 @@
+ using System.Collections.Generic;
+ using System.Linq;
+ using System.Net;
++using System.Threading;
+ using System.Threading.Tasks;
+ using Humanizer;
+ using osu.Framework.Logging;
+@@ -44,9 +45,26 @@ protected ModelDownloader(IModelImporter<TModel> importer, IAPIProvider? api)
+         /// <returns>The request object.</returns>
+         protected abstract ArchiveDownloadRequest<T> CreateDownloadRequest(T model, bool minimiseDownloadSize);
+ 
++#if HBXL
++        // Switch 2 port: at most two downloads (download + import) at a time. Many parallel downloads each held a
++        // dedicated thread and queued archive reads over the slow file-server link; the console froze in back-to-back
++        // full GCs after ~7 overlapping downloads (2026-11-09). Queued downloads start when a slot frees. Also keeps bulk
++        // downloading gentle on ppy's servers.
++        private static readonly SemaphoreSlim hbxl_download_slots = new SemaphoreSlim(2);
++#endif
++
+         protected bool Download(T model, bool minimiseDownloadSize, TModel? originalModel)
+         {
+             if (!canDownload(model)) return false;
++#if HBXL
++            int hbxlSlot = 0; // 0 queued, 1 holding a slot, 2 finished (success, failure or cancel)
++
++            void releaseSlot()
++            {
++                if (Interlocked.Exchange(ref hbxlSlot, 2) == 1)
++                    hbxl_download_slots.Release();
++            }
++#endif
+ 
+             var request = CreateDownloadRequest(model, minimiseDownloadSize);
+ 
+@@ -81,11 +99,17 @@ protected bool Download(T model, bool minimiseDownloadSize, TModel? originalMode
+                             DownloadFailed?.Invoke(request);
+ 
+                         CurrentDownloads.Remove(request);
++#if HBXL
++                        releaseSlot();
++#endif
+                     }
+                 }, TaskCreationOptions.LongRunning);
+             };
+ 
+             request.Failure += triggerFailure;
++#if HBXL
++            request.Failure += _ => releaseSlot();
++#endif
+ 
+             notification.CancelRequested += () =>
+             {
+@@ -96,7 +120,27 @@ protected bool Download(T model, bool minimiseDownloadSize, TModel? originalMode
+             CurrentDownloads.Add(request);
+             PostNotification?.Invoke(notification);
+ 
++#if HBXL
++            if (api != null)
++            {
++                // Attached now so a cancel while queued can schedule its failure callbacks (they need the API).
++                request.AttachAPI(api);
++                Task.Run(async () =>
++                {
++                    await hbxl_download_slots.WaitAsync().ConfigureAwait(false);
++
++                    if (Interlocked.CompareExchange(ref hbxlSlot, 1, 0) != 0)
++                    {
++                        hbxl_download_slots.Release(); // cancelled while queued
++                        return;
++                    }
++
++                    await api.PerformAsync(request).ConfigureAwait(false);
++                });
++            }
++#else
+             api?.PerformAsync(request);
++#endif
+ 
+             DownloadBegan?.Invoke(request);
+             return true;
+diff --git a/osu.Game/Database/RealmObjectExtensions.cs b/osu.Game/Database/RealmObjectExtensions.cs
+index 5d4c1ff378..0bf3f0bb10 100644
+--- a/osu.Game/Database/RealmObjectExtensions.cs
++++ b/osu.Game/Database/RealmObjectExtensions.cs
+@@ -6,8 +6,10 @@
+ using System.Diagnostics;
+ using System.Linq;
+ using System.Runtime.Serialization;
++#if !HBXL_DETACH
+ using AutoMapper;
+ using AutoMapper.Internal;
++#endif
+ using osu.Framework.Logging;
+ using osu.Game.Beatmaps;
+ using osu.Game.Collections;
+@@ -22,6 +24,7 @@ namespace osu.Game.Database
+ {
+     public static class RealmObjectExtensions
+     {
++#if !HBXL_DETACH // Switch 2 port: AutoMapper doesn't work under NativeAOT, see HbxlRealmCopier.
+         private static readonly IMapper write_mapper = new MapperConfiguration(c =>
+         {
+             c.ShouldMapField = _ => false;
+@@ -183,6 +186,7 @@ private static void applyCommonConfiguration(IMapperConfigurationExpression c)
+             c.CreateMap<RealmOnlineAsset, RealmOnlineAsset>();
+             c.CreateMap<SkinInfo, SkinInfo>();
+         }
++#endif
+ 
+         /// <summary>
+         /// Create a detached copy of the each item in the collection.
+@@ -217,10 +221,14 @@ public static T Detach<T>(this T item) where T : RealmObjectBase
+             if (!item.IsManaged)
+                 return item;
+ 
++#if HBXL_DETACH
++            return HbxlRealmCopier.Detach(item, beatmapSetMapper: item is BeatmapSetInfo);
++#else
+             if (item is BeatmapSetInfo)
+                 return beatmap_set_mapper.Map<T>(item);
+ 
+             return mapper.Map<T>(item);
++#endif
+         }
+ 
+         /// <summary>
+@@ -233,7 +241,11 @@ public static void CopyChangesToRealm(this BeatmapSetInfo source, BeatmapSetInfo
+             => copyChangesToRealm(source, destination);
+ 
+         private static void copyChangesToRealm<T>(T source, T destination) where T : RealmObjectBase
++#if HBXL_DETACH
++            => HbxlRealmCopier.CopyChangesToRealm(source, destination);
++#else
+             => write_mapper.Map(source, destination);
++#endif
+ 
+         public static List<Live<T>> ToLiveUnmanaged<T>(this IEnumerable<T> realmList)
+             where T : RealmObject, IHasGuidPrimaryKey
+diff --git a/osu.Game/Graphics/UserInterface/RollingCounter.cs b/osu.Game/Graphics/UserInterface/RollingCounter.cs
+index ac276450d5..06d78153c3 100644
+--- a/osu.Game/Graphics/UserInterface/RollingCounter.cs
++++ b/osu.Game/Graphics/UserInterface/RollingCounter.cs
+@@ -160,9 +160,38 @@ protected virtual void TransformCount(T currentValue, T newValue)
+                     ? GetProportionalDuration(currentValue, newValue)
+                     : RollingDuration;
+ 
++#if HBXL
++            // Switch 2 port (NativeAOT): the string-based TransformTo looks DisplayedCount up by reflection, which
++            // has no metadata on generic instantiations over value types (RollingCounter<double>, <int>, <long>):
++            // "Cannot create TransformCustom for non-existent property or field" crashed the mod select overlay.
++            this.TransformTo(this.PopulateTransform(new DisplayedCountTransform(), newValue, rollingTotalDuration, RollingEasing));
++#else
+             this.TransformTo(nameof(DisplayedCount), newValue, rollingTotalDuration, RollingEasing);
++#endif
+         }
+ 
++#if HBXL
++        /// <summary>
++        /// Reflection-free equivalent of the TransformCustom that <c>TransformTo(nameof(DisplayedCount), ...)</c> creates.
++        /// </summary>
++        private class DisplayedCountTransform : osu.Framework.Graphics.Transforms.Transform<T, RollingCounter<T>>
++        {
++            public override string TargetMember => nameof(DisplayedCount);
++
++            private T valueAt(double time)
++            {
++                if (time < StartTime) return StartValue;
++                if (time >= EndTime) return EndValue;
++
++                return osu.Framework.Utils.Interpolation.ValueAt(time, StartValue, EndValue, StartTime, EndTime, Easing);
++            }
++
++            protected override void Apply(RollingCounter<T> d, double time) => d.DisplayedCount = valueAt(time);
++
++            protected override void ReadIntoStartValue(RollingCounter<T> d) => StartValue = d.DisplayedCount;
++        }
++#endif
++
+         /// <summary>
+         /// Creates the text. Delegates to <see cref="CreateSpriteText"/> by default.
+         /// </summary>
+diff --git a/osu.Game/Online/API/APIAccess.cs b/osu.Game/Online/API/APIAccess.cs
+index c099474341..f7b36cfba2 100644
+--- a/osu.Game/Online/API/APIAccess.cs
++++ b/osu.Game/Online/API/APIAccess.cs
+@@ -492,8 +492,19 @@ public void AuthenticateSecondFactor(string code)
+             SecondFactorCode = code;
+         }
+ 
++#if HBXL_HUBS
++        // Switch 2 port (NativeAOT): only the metadata hub (online users, presence, beatmap updates, daily challenge) is
++        // connected. It goes through HbxlMessagePackHubProtocol, which lists that hub's types. The spectator and
++        // multiplayer hubs refuse self-built clients on ppy's side anyway, so they are never contacted: callers treat
++        // null like DummyAPIAccess does. OSU_HBXL_HUBS=0 turns the metadata hub off as well.
++        public IHubClientConnector GetHubConnector(string clientName, string endpoint) =>
++            clientName == nameof(Metadata.OnlineMetadataClient) && Environment.GetEnvironmentVariable("OSU_HBXL_HUBS") != "0"
++                ? new HubClientConnector(clientName, endpoint, this, versionHash)
++                : null;
++#else
+         public IHubClientConnector GetHubConnector(string clientName, string endpoint) =>
+             new HubClientConnector(clientName, endpoint, this, versionHash);
++#endif
+ 
+         public IChatClient GetChatClient() => new WebSocketChatClient(this);
+ 
+diff --git a/osu.Game/Online/HubClientConnector.cs b/osu.Game/Online/HubClientConnector.cs
+index c12043c727..2af670e40d 100644
+--- a/osu.Game/Online/HubClientConnector.cs
++++ b/osu.Game/Online/HubClientConnector.cs
+@@ -64,10 +64,16 @@ protected override Task<PersistentEndpointClient> BuildConnectionAsync(Cancellat
+                     options.Headers.Add(CLIENT_SESSION_ID_HEADER, API.SessionIdentifier.ToString());
+                 });
+ 
++#if HBXL_HUBS
++            // Switch 2 port (NativeAOT): the stock MessagePack protocol needs runtime code generation for every argument.
++            // Same wire format, ahead-of-time code only (see HbxlMessagePackHubProtocol).
++            builder.Services.AddSingleton<Microsoft.AspNetCore.SignalR.Protocol.IHubProtocol>(new HbxlMessagePackHubProtocol());
++#else
+             builder.AddMessagePackProtocol(options =>
+             {
+                 options.SerializerOptions = SignalRUnionWorkaroundResolver.OPTIONS;
+             });
++#endif
+ 
+             var newConnection = builder.Build();
+ 
+@@ -83,5 +89,9 @@ async Task IHubClientConnector.Disconnect()
+         }
+ 
+         protected override string ClientName { get; }
++
++#if HBXL_HUBS
++        protected override bool LimitShortLivedConnections => true;
++#endif
+     }
+ }
+diff --git a/osu.Game/Online/Metadata/OnlineMetadataClient.cs b/osu.Game/Online/Metadata/OnlineMetadataClient.cs
+index 6e4f7e4d6d..4019e43c7e 100644
+--- a/osu.Game/Online/Metadata/OnlineMetadataClient.cs
++++ b/osu.Game/Online/Metadata/OnlineMetadataClient.cs
+@@ -102,10 +102,101 @@ protected override void LoadComplete()
+ 
+         private bool catchingUp;
+ 
++#if HBXL_HUBS
++        // Switch 2 port. ppy's server accepts a self-built client on this hub and pushes updates to it (beatmap updates,
++        // the daily challenge), but answers every call the client makes with "Realtime online functionality is not
++        // supported on this version of the game" (seen 2026-11-10: GetChangesSince, UpdateActivity and UpdateStatus, all
++        // three sent at connect). Upstream would go on sending UpdateActivity at every screen change and show the refusal
++        // as a notification each time. Here the first call of a connection is the probe: the others wait for its answer,
++        // and if the server refused it nothing more is sent on this connection (callers see a cancelled task, like when
++        // disconnected). This is the server's decision for non-release builds; don't work around it.
++        private const string refusal_text = "not supported on this version";
++        private readonly object gateLock = new object();
++        private Task<bool>? callGate;
++
++        /// <summary>
++        /// Whether the server refused this client's calls on the current connection (see above).
++        /// </summary>
++        public bool CallsRefused { get; private set; }
++
++        private async Task<T> invoke<T>(Func<HubConnection, Task<T>> send)
++        {
++            var hub = connection;
++
++            if (hub == null)
++                throw new OperationCanceledException();
++
++            TaskCompletionSource<bool>? probe = null;
++            Task<bool> gate;
++
++            lock (gateLock)
++            {
++                if (callGate == null)
++                {
++                    probe = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
++                    callGate = probe.Task;
++                    CallsRefused = false;
++                }
++
++                gate = callGate;
++            }
++
++            if (probe == null)
++            {
++                if (!await gate.ConfigureAwait(false))
++                    throw new OperationCanceledException("The server doesn't accept calls from this build.");
++
++                return await send(hub).ConfigureAwait(false);
++            }
++
++            try
++            {
++                T result = await send(hub).ConfigureAwait(false);
++                probe.SetResult(true);
++                return result;
++            }
++            catch (Exception e)
++            {
++                if (e is Microsoft.AspNetCore.SignalR.HubException && e.Message.Contains(refusal_text, StringComparison.OrdinalIgnoreCase))
++                {
++                    CallsRefused = true;
++                    probe.SetResult(false);
++                    Logger.Log($"{nameof(OnlineMetadataClient)}: the server doesn't accept calls from this build (\"{e.Message}\"). "
++                               + "Nothing more will be sent on this connection; updates the server pushes are still received.", LoggingTarget.Network);
++                    throw new OperationCanceledException("The server doesn't accept calls from this build.", e);
++                }
++
++                // anything else (connection lost, ...) says nothing about the server's answer: the next call probes again
++                lock (gateLock)
++                {
++                    if (callGate == probe.Task)
++                        callGate = null;
++                }
++
++                probe.SetResult(true);
++                throw;
++            }
++        }
++
++        private Task invoke(Func<HubConnection, Task> send) => invoke(async c =>
++        {
++            await send(c).ConfigureAwait(false);
++            return true;
++        });
++#else
++        private Task<T> invoke<T>(Func<HubConnection, Task<T>> send) => send(connection!);
++
++        private Task invoke(Func<HubConnection, Task> send) => send(connection!);
++#endif
++
+         private void isConnectedChanged(ValueChangedEvent<bool> connected)
+         {
+             if (!connected.NewValue)
+             {
++#if HBXL_HUBS
++                lock (gateLock)
++                    callGate = null;
++#endif
+                 Schedule(() =>
+                 {
+                     userPresences.Clear();
+@@ -183,7 +274,7 @@ public override Task<BeatmapUpdates> GetChangesSince(int queueId)
+ 
+             Debug.Assert(connection != null);
+ 
+-            return connection.InvokeAsync<BeatmapUpdates>(nameof(IMetadataServer.GetChangesSince), queueId);
++            return invoke(c => c.InvokeAsync<BeatmapUpdates>(nameof(IMetadataServer.GetChangesSince), queueId));
+         }
+ 
+         public override Task UpdateActivity(UserActivity? activity)
+@@ -192,7 +283,7 @@ public override Task UpdateActivity(UserActivity? activity)
+                 return Task.FromCanceled(new CancellationToken(true));
+ 
+             Debug.Assert(connection != null);
+-            return connection.InvokeAsync(nameof(IMetadataServer.UpdateActivity), activity);
++            return invoke(c => c.InvokeAsync(nameof(IMetadataServer.UpdateActivity), activity));
+         }
+ 
+         public override Task UpdateStatus(UserStatus? status)
+@@ -201,7 +292,7 @@ public override Task UpdateStatus(UserStatus? status)
+                 return Task.FromCanceled(new CancellationToken(true));
+ 
+             Debug.Assert(connection != null);
+-            return connection.InvokeAsync(nameof(IMetadataServer.UpdateStatus), status);
++            return invoke(c => c.InvokeAsync(nameof(IMetadataServer.UpdateStatus), status));
+         }
+ 
+         protected override Task BeginWatchingUserPresenceInternal()
+@@ -212,7 +303,7 @@ protected override Task BeginWatchingUserPresenceInternal()
+             Logger.Log($@"{nameof(OnlineMetadataClient)} began watching user presence", LoggingTarget.Network);
+ 
+             Debug.Assert(connection != null);
+-            return connection.InvokeAsync(nameof(IMetadataServer.BeginWatchingUserPresence));
++            return invoke(c => c.InvokeAsync(nameof(IMetadataServer.BeginWatchingUserPresence)));
+         }
+ 
+         protected override Task EndWatchingUserPresenceInternal()
+@@ -226,7 +317,7 @@ protected override Task EndWatchingUserPresenceInternal()
+             Schedule(() => userPresences.Clear());
+ 
+             Debug.Assert(connection != null);
+-            return connection.InvokeAsync(nameof(IMetadataServer.EndWatchingUserPresence));
++            return invoke(c => c.InvokeAsync(nameof(IMetadataServer.EndWatchingUserPresence)));
+         }
+ 
+         public override Task UserPresenceUpdated(int userId, UserPresence? presence)
+@@ -277,7 +368,7 @@ public override async Task<MultiplayerPlaylistItemStats[]> BeginWatchingMultipla
+             WatchedRooms.Add(id);
+ 
+             Debug.Assert(connection != null);
+-            var result = await connection.InvokeAsync<MultiplayerPlaylistItemStats[]>(nameof(IMetadataServer.BeginWatchingMultiplayerRoom), id).ConfigureAwait(false);
++            var result = await invoke(c => c.InvokeAsync<MultiplayerPlaylistItemStats[]>(nameof(IMetadataServer.BeginWatchingMultiplayerRoom), id)).ConfigureAwait(false);
+             Logger.Log($@"{nameof(OnlineMetadataClient)} began watching multiplayer room with ID {id}", LoggingTarget.Network);
+             return result;
+         }
+@@ -290,7 +381,7 @@ public override async Task EndWatchingMultiplayerRoom(long id)
+             WatchedRooms.Remove(id);
+ 
+             Debug.Assert(connection != null);
+-            await connection.InvokeAsync(nameof(IMetadataServer.EndWatchingMultiplayerRoom), id).ConfigureAwait(false);
++            await invoke(c => c.InvokeAsync(nameof(IMetadataServer.EndWatchingMultiplayerRoom), id)).ConfigureAwait(false);
+             Logger.Log($@"{nameof(OnlineMetadataClient)} stopped watching multiplayer room with ID {id}", LoggingTarget.Network);
+         }
+ 
+@@ -300,7 +391,7 @@ public override async Task RefreshFriends()
+                 throw new OperationCanceledException();
+ 
+             Debug.Assert(connection != null);
+-            await connection.InvokeAsync(nameof(IMetadataServer.RefreshFriends)).ConfigureAwait(false);
++            await invoke(c => c.InvokeAsync(nameof(IMetadataServer.RefreshFriends))).ConfigureAwait(false);
+         }
+ 
+         protected override void Dispose(bool isDisposing)
+diff --git a/osu.Game/Online/Notifications/WebSocket/WebSocketNotificationsClientConnector.cs b/osu.Game/Online/Notifications/WebSocket/WebSocketNotificationsClientConnector.cs
+index 00f0f873b8..b60cab4c76 100644
+--- a/osu.Game/Online/Notifications/WebSocket/WebSocketNotificationsClientConnector.cs
++++ b/osu.Game/Online/Notifications/WebSocket/WebSocketNotificationsClientConnector.cs
+@@ -32,8 +32,18 @@ protected override async Task<PersistentEndpointClient> BuildConnectionAsync(Can
+             var req = new GetNotificationsRequest();
+             // must use `PerformAsync()`, since we may not be fully online yet
+             // (see `APIState.RequiresSecondFactorAuth` - in this state queued requests will not execute).
++            Exception? failure = null;
++            req.Failure += e => failure = e;
+             await api.PerformAsync(req).ConfigureAwait(false);
+-            string endpoint = req.Response!.Endpoint;
++
++            // HBXL: PerformAsync doesn't throw when the request fails (no network): Response is null then. Upstream
++            // dereferences it and relies on the NullReferenceException being caught by the caller. On hbxl a null
++            // dereference is a hardware fault with no signal to turn it into an exception: it killed SmileBASIC
++            // seconds after every network loss (2026-11-10). Throw a real exception instead.
++            if (req.Response == null)
++                throw failure ?? new InvalidOperationException("The notifications endpoint request returned nothing.");
++
++            string endpoint = req.Response.Endpoint;
+ 
+             ClientWebSocket socket = new ClientWebSocket();
+             socket.Options.SetRequestHeader(@"Authorization", @$"Bearer {api.AccessToken}");
+diff --git a/osu.Game/Online/PersistentEndpointClientConnector.cs b/osu.Game/Online/PersistentEndpointClientConnector.cs
+index 7064906be4..82590c16a0 100644
+--- a/osu.Game/Online/PersistentEndpointClientConnector.cs
++++ b/osu.Game/Online/PersistentEndpointClientConnector.cs
+@@ -38,6 +38,23 @@ public abstract class PersistentEndpointClientConnector : IDisposable
+         /// </summary>
+         private int retryDelay = 3000;
+ 
++#if HBXL_HUBS
++        // Switch 2 port: upstream resets the retry delay on every connect, so a connection that is accepted and then dies
++        // straight away (a protocol problem on our side, a server that doesn't want this client) would be re-made every
++        // ~3 seconds for as long as the game runs. Connections that end within a minute count as
++        // "short-lived"; each one in a row adds a wait before the next attempt (15 s, 1 min, 4 min, then 10 min), and
++        // after 6 in a row the connector stops until the API state changes (logout/login) or the game restarts.
++        // Only for connectors that opt in (the SignalR hub): the notifications socket keeps upstream's behaviour, it has
++        // to come back quickly on a flaky network.
++        protected virtual bool LimitShortLivedConnections => false;
++
++        private const int short_lived_ms = 60000;
++        private const int short_lived_give_up = 6;
++        private long connectedAt;
++        private int shortLivedInARow;
++        private int connectGeneration;
++#endif
++
+         /// <summary>
+         /// Constructs a new <see cref="PersistentEndpointClientConnector"/>.
+         /// </summary>
+@@ -85,6 +102,9 @@ private async Task connectIfPossible()
+         private async Task connect()
+         {
+             cancelExistingConnect();
++#if HBXL_HUBS
++            Interlocked.Increment(ref connectGeneration);
++#endif
+             // reset retry delay to default.
+             retryDelay = 3000;
+ 
+@@ -118,6 +138,9 @@ private async Task connect()
+                         await CurrentConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
+ 
+                         Logger.Log($"{ClientName} connected!", LoggingTarget.Network);
++#if HBXL_HUBS
++                        connectedAt = Environment.TickCount64;
++#endif
+                         isConnected.Value = true;
+                         return;
+                     }
+@@ -171,6 +194,37 @@ private async Task onConnectionClosed(Exception? ex, CancellationToken cancellat
+             else
+                 Logger.Log($"{ClientName} disconnected", LoggingTarget.Network);
+ 
++#if HBXL_HUBS
++            if (!hasBeenCancelled && LimitShortLivedConnections)
++            {
++                long connectedFor = Environment.TickCount64 - connectedAt;
++
++                if (connectedAt == 0 || connectedFor >= short_lived_ms)
++                    shortLivedInARow = 0;
++                else if (++shortLivedInARow >= short_lived_give_up)
++                {
++                    Logger.Log($"{ClientName}: {shortLivedInARow} connections in a row ended within a minute. Not reconnecting again in this session.",
++                        LoggingTarget.Network, LogLevel.Important);
++                    shortLivedInARow = 0;
++                    return;
++                }
++                else
++                {
++                    int extraDelay = Math.Min(600000, 15000 << (2 * (shortLivedInARow - 1)));
++                    Logger.Log($"{ClientName}: connection ended after {connectedFor / 1000} s ({shortLivedInARow} in a row). Waiting {extraDelay / 1000} more seconds before reconnecting.",
++                        LoggingTarget.Network);
++
++                    // (the connection's token is cancelled by now, so it can't be used to cut the wait short)
++                    int generation = Volatile.Read(ref connectGeneration);
++                    await Task.Delay(extraDelay, CancellationToken.None).ConfigureAwait(false);
++
++                    // a connect was started elsewhere in the meantime (login state change, Reconnect())
++                    if (generation != Volatile.Read(ref connectGeneration))
++                        return;
++                }
++            }
++#endif
++
+             // make sure a disconnect wasn't triggered (and this is still the active connection).
+             if (!hasBeenCancelled)
+                 await Task.Run(connect, CancellationToken.None).ConfigureAwait(false);
+diff --git a/osu.Game/OsuGameBase.cs b/osu.Game/OsuGameBase.cs
+index 25fa587d34..d4cf5b8e5f 100644
+--- a/osu.Game/OsuGameBase.cs
++++ b/osu.Game/OsuGameBase.cs
+@@ -278,7 +278,12 @@ private void load(ReadableKeyCombinationProvider keyCombinationProvider, Framewo
+                 VersionHash = $"{Version}-{RuntimeInfo.OS}".ComputeMD5Hash();
+             }
+ 
++#if HBXL
++            // Switch 2 port: the embedded assets are loose files on the file server (see HbxlFileResourceStore).
++            Resources.AddStore(new HbxlFileResourceStore(Environment.GetEnvironmentVariable("OSU_RESOURCES_DIR") ?? "/osu-resources", OsuResources.ResourceAssembly));
++#else
+             Resources.AddStore(new DllResourceStore(OsuResources.ResourceAssembly));
++#endif
+ 
+             dependencies.Cache(realm = new RealmAccess(Storage, CLIENT_DATABASE_FILENAME, Host.UpdateThread));
+ 
+diff --git a/osu.Game/Overlays/SettingsOverlay.cs b/osu.Game/Overlays/SettingsOverlay.cs
+index a82db88021..b0f400e4e1 100644
+--- a/osu.Game/Overlays/SettingsOverlay.cs
++++ b/osu.Game/Overlays/SettingsOverlay.cs
+@@ -34,6 +34,14 @@ public partial class SettingsOverlay : SettingsPanel, INamedOverlayComponent
+ 
+         protected override Drawable CreateHeader() => new SettingsHeader(Title, Description);
+ 
++#if HBXL_SETTINGS
++        /// <summary>
++        /// Switch 2 port: creates sections that live outside osu.Game (console/osu-game's "Switch 2" section). Set before the
++        /// game loads; the sections go after the online section.
++        /// </summary>
++        public static Func<IEnumerable<SettingsSection>>? CreateExtraSections;
++#endif
++
+         protected override Drawable CreateFooter() => new OsuContextMenuContainer
+         {
+             RelativeSizeAxes = Axes.X,
+@@ -104,6 +112,11 @@ private void load(RulesetStore rulesets)
+                 new DebugSection()
+             });
+ 
++#if HBXL_SETTINGS
++            if (CreateExtraSections != null)
++                sections.InsertRange(sections.FindIndex(s => s is MaintenanceSection), CreateExtraSections());
++#endif
++
+             var today = DateTimeOffset.Now;
+             if (today.Month == 4 && today.Day == 1)
+                 sections.Insert(9, new AfToggleSection());
+diff --git a/osu.Game/Rulesets/UI/FrameStabilityContainer.cs b/osu.Game/Rulesets/UI/FrameStabilityContainer.cs
+index 990c1c839b..386d1f5023 100644
+--- a/osu.Game/Rulesets/UI/FrameStabilityContainer.cs
++++ b/osu.Game/Rulesets/UI/FrameStabilityContainer.cs
+@@ -159,6 +159,12 @@ private void updateClock()
+ 
+             // TODO: replace IsDebugBuild with a framework flag which asserts we are in a test scene, interactively or otherwise.
+             bool allowReferenceClockSeeks = hasReplayAttached || DebugUtils.IsNUnitRunning || DebugUtils.IsDebugBuild || !FrameStablePlayback;
++#if HBXL
++            // No BASS on the console: the reference clock is a stopwatch-driven virtual track that keeps running through
++            // GC pauses. With the >500 ms guard below, one long pause froze gameplay for good (the frame-stable time stops
++            // advancing, so the gap only grows). Catch up instead, as debug builds do.
++            allowReferenceClockSeeks = true;
++#endif
+ 
+             // This is a hotfix for ongoing bass issues we are trying to resolve (see https://www.un4seen.com/forum/?topic=20482.msg145474#msg145474)
+             //
+diff --git a/osu.Game/Screens/Play/SubmittingPlayer.cs b/osu.Game/Screens/Play/SubmittingPlayer.cs
+index 3d201b26d3..16d59a769f 100644
+--- a/osu.Game/Screens/Play/SubmittingPlayer.cs
++++ b/osu.Game/Screens/Play/SubmittingPlayer.cs
+@@ -86,7 +86,12 @@ private void load()
+ 
+         protected override GameplayClockContainer CreateGameplayClockContainer(WorkingBeatmap beatmap, double gameplayStart) => new MasterGameplayClockContainer(beatmap, gameplayStart)
+         {
++#if HBXL
++            // The virtual track's clock drifts across GC pauses; validation only produced "check your audio drivers".
++            ShouldValidatePlaybackRate = false,
++#else
+             ShouldValidatePlaybackRate = true,
++#endif
+         };
+ 
+         protected override void LoadAsyncComplete()
+@@ -112,6 +117,17 @@ private bool handleTokenRetrieval()
+                 return false;
+             }
+ 
++#if HBXL
++            // Switch 2 port: ppy's server only accepts score submission from official builds, so the token request is
++            // always refused, and every play showed "Score will not be submitted" (2026-11-09). Don't ask; the score is
++            // still saved locally. Also one pointless request to ppy less per play. OSU_HBXL_SUBMIT=1 asks again.
++            if (Environment.GetEnvironmentVariable("OSU_HBXL_SUBMIT") != "1")
++            {
++                handleTokenFailure(new InvalidOperationException("Score submission needs an official build."), displayNotification: false);
++                return false;
++            }
++#endif
++
+             var req = CreateTokenRequest();
+ 
+             if (req == null)
+diff --git a/osu.Game/Utils/BindableValueAccessor.cs b/osu.Game/Utils/BindableValueAccessor.cs
+index a4cd356339..07e6a22e56 100644
+--- a/osu.Game/Utils/BindableValueAccessor.cs
++++ b/osu.Game/Utils/BindableValueAccessor.cs
+@@ -16,6 +16,11 @@ internal static class BindableValueAccessor
+ 
+         public static object GetValue(IBindable bindable)
+         {
++#if HBXL
++            // Switch 2 port (NativeAOT): MakeGenericMethod over value types needs code that was never compiled.
++            if (bindable is INotifyValueChangedUntyped untyped)
++                return untyped.ValueUntyped;
++#endif
+             Type? bindableWithValueType = bindable.GetType().GetInterfaces().FirstOrDefault(t => t.IsGenericType && t.GetGenericTypeDefinition() == typeof(IBindable<>));
+             if (bindableWithValueType == null)
+                 return bindable;
+@@ -25,6 +30,14 @@ public static object GetValue(IBindable bindable)
+ 
+         public static void SetValue(IBindable bindable, object value)
+         {
++#if HBXL
++            // Switch 2 port: Bindable<T>.Parse assigns a boxed T directly (no MakeGenericMethod).
++            if (bindable is INotifyValueChangedUntyped && bindable is IParseable parseable)
++            {
++                parseable.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
++                return;
++            }
++#endif
+             Type? bindableWithValueType = bindable.GetType().EnumerateBaseTypes().SingleOrDefault(t => t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Bindable<>));
+             if (bindableWithValueType == null)
+                 return;
+diff --git a/osu.Game/osu.Game.csproj b/osu.Game/osu.Game.csproj
+index caaaf54c46..080fdb5f91 100644
+--- a/osu.Game/osu.Game.csproj
++++ b/osu.Game/osu.Game.csproj
+@@ -17,6 +17,18 @@
+       <PackagePath>icon.png</PackagePath>
+     </None>
+   </ItemGroup>
++  <!-- Switch 2 (HBLauncher) console build: dotnet publish -p:HbxlBuild=true -->
++  <PropertyGroup Condition="'$(HbxlBuild)' == 'true'">
++    <DefineConstants>$(DefineConstants);HBXL;HBXL_DETACH;HBXL_SETTINGS;HBXL_HUBS</DefineConstants>
++  </PropertyGroup>
++  <!-- Desktop test of the AutoMapper-free detach (HbxlRealmCopier): dotnet test -p:HbxlDetachTest=true.
++       HBXL_SETTINGS (both builds): SettingsOverlay.CreateExtraSections, for console/osu-game's "Switch 2" section. -->
++  <PropertyGroup Condition="'$(HbxlDetachTest)' == 'true'">
++    <DefineConstants>$(DefineConstants);HBXL_DETACH;HBXL_SETTINGS;HBXL_HUBS</DefineConstants>
++  </PropertyGroup>
++  <ItemGroup Label="Local framework (Switch 2 port: ../osu-framework, HBXL-patched)">
++    <ProjectReference Include="..\..\osu-framework\osu.Framework\osu.Framework.csproj" />
++  </ItemGroup>
+   <ItemGroup Label="Package References">
+     <!-- Held back due to licencing change stupidness. Silenced vulnerability does not affect us. -->
+     <PackageReference Include="AutoMapper" Version="13.0.1">
+@@ -38,7 +50,6 @@
+       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+     </PackageReference>
+     <PackageReference Include="Realm" Version="20.1.0"/>
+-    <PackageReference Include="ppy.osu.Framework" Version="2026.1030.0"/>
+     <PackageReference Include="ppy.osu.Game.Resources" Version="2026.1021.0"/>
+     <PackageReference Include="Sentry" Version="6.11.0"/>
+     <PackageReference Include="SharpCompress" Version="0.50.4"/>
+diff --git a/Directory.Build.targets b/Directory.Build.targets
+new file mode 100644
+index 0000000000..21d4957ccd
+--- /dev/null
++++ b/Directory.Build.targets
+@@ -0,0 +1,11 @@
++<Project>
++  <!-- osu-HBLauncher (Switch 2 port): version stamp for osu.Game and the rulesets, like ppy's release builds get from CI.
++       Skin layouts name their component types with assembly versions ("osu.Game, Version=2026.807.0.0"), and a reference
++       to a higher version than the loaded assembly doesn't resolve, so with the default 0.0.0 every saved layout fell back
++       to the defaults. Stamped with the build date in osu!'s yyyy.Mdd scheme, so it is never older than a release made
++       before the build. Imported after each project file, so it overrides osu.Game.csproj's 0.0.0. The console entry
++       assembly (console/osu-game, outside this tree) stays 0.0.0 on purpose: osu! treats that one as "not deployed". -->
++  <PropertyGroup Condition="'$(HbxlBuild)' == 'true' Or '$(HbxlDetachTest)' == 'true'">
++    <Version>$([System.DateTime]::Now.ToString('yyyy.Mdd')).0</Version>
++  </PropertyGroup>
++</Project>
+diff --git a/osu.Game/Database/HbxlRealmCopier.cs b/osu.Game/Database/HbxlRealmCopier.cs
+new file mode 100644
+index 0000000000..229fcdd9bf
+--- /dev/null
++++ b/osu.Game/Database/HbxlRealmCopier.cs
+@@ -0,0 +1,282 @@
++// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
++// See the LICENCE file in the repository root for full licence text.
++
++#if HBXL_DETACH
++using System;
++using System.Collections;
++using System.Collections.Concurrent;
++using System.Collections.Generic;
++using System.Diagnostics;
++using System.Linq;
++using System.Reflection;
++using System.Runtime.Serialization;
++using osu.Framework.Logging;
++using osu.Game.Beatmaps;
++using osu.Game.Rulesets;
++using Realms;
++
++namespace osu.Game.Database
++{
++    /// <summary>
++    /// Switch 2 (HBLauncher) port: AutoMapper-free replacement for the mappers in <see cref="RealmObjectExtensions"/>.
++    /// </summary>
++    /// <remarks>
++    /// AutoMapper doesn't work under NativeAOT: sealing a <c>MapperConfiguration</c> reflects over generic
++    /// interface instantiations (e.g. <c>IList&lt;string&gt;.GetEnumerator</c>), which have no metadata, and it compiles
++    /// expression trees. This copier follows the same rules as the AutoMapper configurations it replaces, but only
++    /// uses plain <see cref="PropertyInfo"/> get/set on non-generic types (osu.Game is a rooted assembly in the
++    /// console build, so all of that metadata exists):
++    /// <list type="bullet">
++    /// <item>members marked <see cref="IgnoredAttribute"/>, <see cref="BacklinkAttribute"/> or <see cref="IgnoreDataMemberAttribute"/> are skipped;</item>
++    /// <item>detach maps properties with a public getter: settable ones are assigned (realm objects are detached recursively),
++    /// get-only <see cref="IList{T}"/> properties (realm lists) are refilled;</item>
++    /// <item>copy-to-realm maps properties with a public setter, plus the explicit after-map steps of the original.</item>
++    /// </list>
++    /// Like the original <c>MaxDepth</c> maps (which preserve references), <see cref="BeatmapInfo"/> and
++    /// <see cref="BeatmapSetInfo"/> are detached once per graph, so cycles between them resolve to the same instance.
++    /// </remarks>
++    internal static class HbxlRealmCopier
++    {
++        private static readonly ConcurrentDictionary<Type, PropertyInfo[]> detach_properties = new ConcurrentDictionary<Type, PropertyInfo[]>();
++        private static readonly ConcurrentDictionary<Type, PropertyInfo[]> write_properties = new ConcurrentDictionary<Type, PropertyInfo[]>();
++
++        #region Detach
++
++        /// <param name="item">A managed realm object.</param>
++        /// <param name="beatmapSetMapper">Behave like the optimised <c>beatmap_set_mapper</c>
++        /// (<see cref="BeatmapSetInfo.Files"/> and <see cref="BeatmapInfo.BeatmapSet"/> aren't mapped).</param>
++        public static T Detach<T>(T item, bool beatmapSetMapper) where T : RealmObjectBase
++            => (T)new DetachContext(beatmapSetMapper).Detach(item);
++
++        private class DetachContext
++        {
++            private readonly bool beatmapSetMapper;
++            private readonly Dictionary<(Type, Guid), RealmObjectBase> references = new Dictionary<(Type, Guid), RealmObjectBase>();
++
++            public DetachContext(bool beatmapSetMapper)
++            {
++                this.beatmapSetMapper = beatmapSetMapper;
++            }
++
++            public RealmObjectBase Detach(RealmObjectBase source)
++            {
++                var type = source.GetType();
++
++                (Type, Guid)? key = source is BeatmapInfo or BeatmapSetInfo ? (type, ((IHasGuidPrimaryKey)source).ID) : null;
++
++                if (key != null && references.TryGetValue(key.Value, out var existing))
++                    return existing;
++
++                var destination = createInstance(type);
++
++                if (key != null)
++                    references[key.Value] = destination;
++
++                foreach (var property in detach_properties.GetOrAdd(type, t => getProperties(t, write: false)))
++                {
++                    if (beatmapSetMapper && isSkippedBySetMapper(property))
++                        continue;
++
++                    object? value = property.GetValue(source);
++
++                    if (property.SetMethod != null)
++                    {
++                        property.SetValue(destination, mapValue(value));
++                    }
++                    else if (isGenericList(property.PropertyType))
++                    {
++                        // Get-only realm list: fill the destination's own (unmanaged) list.
++                        var destinationList = (IList?)property.GetValue(destination)
++                                              ?? throw new InvalidOperationException($"{type.Name}.{property.Name} has no list to fill on a new instance.");
++
++                        destinationList.Clear();
++
++                        if (value is IEnumerable sourceItems)
++                        {
++                            foreach (object? item in sourceItems)
++                                destinationList.Add(mapValue(item));
++                        }
++                    }
++
++                    // Other get-only properties are computed and can't be mapped (AutoMapper skips them too).
++                }
++
++                switch (destination)
++                {
++                    case BeatmapSetInfo set:
++                        foreach (var beatmap in set.Beatmaps)
++                            beatmap.BeatmapSet = set;
++                        break;
++
++                    case BeatmapInfo beatmap when !beatmapSetMapper:
++                        for (int i = 0; i < beatmap.BeatmapSet?.Beatmaps.Count; i++)
++                        {
++                            if (beatmap.BeatmapSet.Beatmaps[i].Equals(beatmap))
++                            {
++                                beatmap.BeatmapSet.Beatmaps[i] = beatmap;
++                                break;
++                            }
++                        }
++
++                        break;
++                }
++
++                return destination;
++            }
++
++            private object? mapValue(object? value) => value is RealmObjectBase realmObject ? Detach(realmObject) : value;
++
++            private static bool isSkippedBySetMapper(PropertyInfo property) =>
++                (property.DeclaringType == typeof(BeatmapSetInfo) && property.Name == nameof(BeatmapSetInfo.Files))
++                || (property.DeclaringType == typeof(BeatmapInfo) && property.Name == nameof(BeatmapInfo.BeatmapSet));
++
++            private static RealmObjectBase createInstance(Type type)
++            {
++                // Matches `ConstructUsing(_ => new BeatmapSetInfo(null))` in the original configuration.
++                if (type == typeof(BeatmapSetInfo))
++                    return new BeatmapSetInfo(null);
++
++                // Every realm model has a parameterless constructor (often private, used by Realm itself).
++                return (RealmObjectBase)Activator.CreateInstance(type, nonPublic: true)!;
++            }
++        }
++
++        #endregion
++
++        #region Copy changes to realm
++
++        /// <summary>
++        /// Copies a detached object's changes onto a live (managed) object, like the original <c>write_mapper</c>.
++        /// </summary>
++        public static void CopyChangesToRealm(RealmObjectBase source, RealmObjectBase destination)
++        {
++            var type = source.GetType();
++
++            foreach (var property in write_properties.GetOrAdd(type, t => getProperties(t, write: true)))
++            {
++                if (isIgnoredByWriteMapper(property))
++                    continue;
++
++                object? value = property.GetValue(source);
++
++                if (value is RealmObjectBase nestedSource)
++                {
++                    // No current model reaches here (all such members are handled explicitly below), but don't attach
++                    // a detached object to a live one by accident.
++                    if (property.GetValue(destination) is RealmObjectBase nestedDestination)
++                        CopyChangesToRealm(nestedSource, nestedDestination);
++                    else
++                        throw new InvalidOperationException($"{type.Name}.{property.Name}: no live object to copy changes into.");
++
++                    continue;
++                }
++
++                property.SetValue(destination, value);
++            }
++
++            switch (source)
++            {
++                case BeatmapMetadata s:
++                    CopyChangesToRealm(s.Author, ((BeatmapMetadata)destination).Author);
++                    break;
++
++                case BeatmapInfo s:
++                {
++                    var d = (BeatmapInfo)destination;
++                    d.Ruleset = d.Realm!.Find<RulesetInfo>(s.Ruleset.ShortName)!;
++                    CopyChangesToRealm(s.Difficulty, d.Difficulty);
++                    CopyChangesToRealm(s.Metadata, d.Metadata);
++                    break;
++                }
++
++                case BeatmapSetInfo s:
++                {
++                    var d = (BeatmapSetInfo)destination;
++
++                    foreach (var beatmap in s.Beatmaps)
++                    {
++                        // Importantly, search all of realm for the beatmap (not just the set's beatmaps).
++                        // It may have gotten detached, and if that's the case let's use this opportunity to fix
++                        // things up.
++                        var existingBeatmap = d.Realm!.Find<BeatmapInfo>(beatmap.ID);
++
++                        if (existingBeatmap != null)
++                        {
++                            // As above, reattach if it happens to not be in the set's beatmaps.
++                            if (!d.Beatmaps.Contains(existingBeatmap))
++                            {
++                                Debug.Fail("Beatmaps should never become detached under normal circumstances. If this ever triggers, it should be investigated further.");
++                                Logger.Log("WARNING: One of the difficulties in a beatmap was detached from its set. Please save a copy of logs and report this to devs.", LoggingTarget.Database,
++                                    LogLevel.Important);
++                                d.Beatmaps.Add(existingBeatmap);
++                            }
++
++                            CopyChangesToRealm(beatmap, existingBeatmap);
++                        }
++                        else
++                        {
++                            var newBeatmap = new BeatmapInfo
++                            {
++                                ID = beatmap.ID,
++                                BeatmapSet = d,
++                                Ruleset = d.Realm.Find<RulesetInfo>(beatmap.Ruleset.ShortName)!
++                            };
++
++                            d.Beatmaps.Add(newBeatmap);
++                            CopyChangesToRealm(beatmap, newBeatmap);
++                        }
++                    }
++
++                    break;
++                }
++            }
++        }
++
++        private static bool isIgnoredByWriteMapper(PropertyInfo property)
++        {
++            if (property.DeclaringType == typeof(BeatmapMetadata))
++                return property.Name == nameof(BeatmapMetadata.Author);
++
++            if (property.DeclaringType == typeof(BeatmapInfo))
++            {
++                switch (property.Name)
++                {
++                    case nameof(BeatmapInfo.Ruleset):
++                    case nameof(BeatmapInfo.Metadata):
++                    case nameof(BeatmapInfo.UserSettings):
++                    case nameof(BeatmapInfo.Difficulty):
++                    case nameof(BeatmapInfo.BeatmapSet):
++                        return true;
++                }
++            }
++
++            if (property.DeclaringType == typeof(BeatmapSetInfo))
++                return property.Name == nameof(BeatmapSetInfo.Beatmaps);
++
++            return false;
++        }
++
++        #endregion
++
++        /// <param name="type">The model type.</param>
++        /// <param name="write"><c>false</c>: <c>ShouldMapProperty = GetMethod is public</c> (detach);
++        /// <c>true</c>: <c>ShouldMapProperty = SetMethod is public</c> (copy to realm).</param>
++        private static PropertyInfo[] getProperties(Type type, bool write)
++        {
++            var realmAssembly = typeof(RealmObjectBase).Assembly;
++
++            return type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
++                       .Where(p => p.GetIndexParameters().Length == 0)
++                       // RealmObjectBase's own members (IsManaged, Realm, ObjectSchema, DynamicApi, ...) aren't model data.
++                       .Where(p => p.DeclaringType?.Assembly != realmAssembly)
++                       .Where(p => p.GetMethod != null && (write ? p.SetMethod?.IsPublic == true : p.GetMethod.IsPublic))
++                       .Where(p => !Attribute.IsDefined(p, typeof(IgnoredAttribute))
++                                   && !Attribute.IsDefined(p, typeof(BacklinkAttribute))
++                                   && !Attribute.IsDefined(p, typeof(IgnoreDataMemberAttribute)))
++                       .ToArray();
++        }
++
++        private static bool isGenericList(Type type) => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IList<>);
++    }
++}
++#endif
+diff --git a/osu.Game/IO/HbxlFileResourceStore.cs b/osu.Game/IO/HbxlFileResourceStore.cs
+new file mode 100644
+index 0000000000..9053b7f4fd
+--- /dev/null
++++ b/osu.Game/IO/HbxlFileResourceStore.cs
+@@ -0,0 +1,98 @@
++// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
++// See the LICENCE file in the repository root for full licence text.
++
++#if HBXL
++using System;
++using System.Collections.Generic;
++using System.IO;
++using System.Linq;
++using System.Reflection;
++using System.Threading;
++using System.Threading.Tasks;
++using osu.Framework.IO.Stores;
++
++namespace osu.Game.IO
++{
++    /// <summary>
++    /// Switch 2 (HBLauncher) port: an assembly's embedded resources served from loose files.
++    /// The console binary is limited by the SDK heap, so the NativeAOT build drops
++    /// osu.Game.Resources' embedded assets (ILLink substitutions) and they are extracted on the PC
++    /// as files named by their manifest resource names (tools/resource-extract). Lookups follow
++    /// <see cref="DllResourceStore"/>'s naming exactly; anything not on disk (e.g. compiled
++    /// .resources tables) falls back to the assembly.
++    /// </summary>
++    public class HbxlFileResourceStore : IResourceStore<byte[]>
++    {
++        private readonly string directory;
++        private readonly string prefix;
++        private readonly DllResourceStore fallback;
++
++        public HbxlFileResourceStore(string directory, Assembly assembly)
++        {
++            this.directory = directory;
++            prefix = assembly.GetName().Name!;
++            fallback = new DllResourceStore(assembly);
++        }
++
++        private string manifestName(string name)
++        {
++            string[] split = name.Split('/');
++            for (int i = 0; i < split.Length - 1; i++)
++                split[i] = split[i].Replace('-', '_');
++            return $@"{prefix}.{string.Join('.', split)}";
++        }
++
++        public Stream? GetStream(string name)
++        {
++            string file = Path.Combine(directory, manifestName(name));
++            if (File.Exists(file))
++                return File.OpenRead(file);
++
++            return fallback.GetStream(name);
++        }
++
++        public byte[]? Get(string name)
++        {
++            string file = Path.Combine(directory, manifestName(name));
++            return File.Exists(file) ? File.ReadAllBytes(file) : fallback.Get(name);
++        }
++
++        public async Task<byte[]?> GetAsync(string name, CancellationToken cancellationToken = default)
++        {
++            string file = Path.Combine(directory, manifestName(name));
++            if (File.Exists(file))
++                return await File.ReadAllBytesAsync(file, cancellationToken).ConfigureAwait(false);
++
++            return await fallback.GetAsync(name, cancellationToken).ConfigureAwait(false);
++        }
++
++        public IEnumerable<string> GetAvailableResources()
++        {
++            IEnumerable<string> files = Directory.Exists(directory)
++                ? Directory.EnumerateFiles(directory).Select(Path.GetFileName).OfType<string>()
++                           .Where(n => n.StartsWith(prefix + ".", StringComparison.Ordinal))
++                           .Select(toLookupName)
++                : Enumerable.Empty<string>();
++
++            return files.Concat(fallback.GetAvailableResources()).Distinct();
++        }
++
++        // Same transformation as DllResourceStore.GetAvailableResources.
++        private string toLookupName(string n)
++        {
++            n = n.Substring(prefix.Length + 1);
++            int lastDot = n.LastIndexOf('.');
++            char[] chars = n.ToCharArray();
++            for (int i = 0; i < lastDot; i++)
++            {
++                if (chars[i] == '.')
++                    chars[i] = '/';
++            }
++
++            return new string(chars);
++        }
++
++        public void Dispose() => fallback.Dispose();
++    }
++}
++#endif
+diff --git a/osu.Game/Online/HbxlMessagePackHubProtocol.cs b/osu.Game/Online/HbxlMessagePackHubProtocol.cs
+new file mode 100644
+index 0000000000..50ca8efcaf
+--- /dev/null
++++ b/osu.Game/Online/HbxlMessagePackHubProtocol.cs
+@@ -0,0 +1,882 @@
++// Switch 2 port (osu-HBLauncher). The message framing below is a port of ASP.NET Core's MessagePackHubProtocolWorker,
++// BinaryMessageParser and BinaryMessageFormatter (v10.0.0):
++//   Licensed to the .NET Foundation under one or more agreements.
++//   The .NET Foundation licenses this file to you under the MIT license.
++
++#if HBXL_HUBS
++
++using System;
++using System.Buffers;
++using System.Collections.Generic;
++using System.Diagnostics.CodeAnalysis;
++using System.IO;
++using System.Runtime.ExceptionServices;
++using System.Text;
++using MessagePack;
++using MessagePack.Formatters;
++using Microsoft.AspNetCore.Connections;
++using Microsoft.AspNetCore.SignalR;
++using Microsoft.AspNetCore.SignalR.Protocol;
++using osu.Game.Online.Metadata;
++using osu.Game.Users;
++
++namespace osu.Game.Online
++{
++    /// <summary>
++    /// SignalR's "messagepack" hub protocol without runtime code generation, for NativeAOT.
++    /// </summary>
++    /// <remarks>
++    /// The stock <c>MessagePackHubProtocol</c> hands every argument to <c>MessagePackSerializer.Serialize(Type, ref writer, ...)</c>.
++    /// That non-generic entry point is built from expression trees and throws "MessagePackWriter/Reader overload is not
++    /// supported in MessagePackSerializer.NonGenerics" under NativeAOT: the hubs connected, but no call ever went out.
++    /// Here every type that crosses the wire is listed in <see cref="HbxlHubTypes"/> and goes through the generic API, with
++    /// the formatters MessagePack's source generator already puts into osu.Game. The bytes are the same as the stock
++    /// protocol's (console/osu-game: OSU_HBXL_HUB_SELFTEST).
++    /// Only the metadata hub's types are listed (online users, presence, beatmap updates, daily challenge).
++    /// </remarks>
++    public sealed class HbxlMessagePackHubProtocol : IHubProtocol
++    {
++        private const int error_result = 1;
++        private const int void_result = 2;
++        private const int non_void_result = 3;
++
++        private readonly MessagePackSerializerOptions options;
++
++        public HbxlMessagePackHubProtocol()
++            : this(HbxlHubTypes.OPTIONS)
++        {
++        }
++
++        public HbxlMessagePackHubProtocol(MessagePackSerializerOptions options)
++        {
++            this.options = options;
++        }
++
++        public string Name => "messagepack";
++
++        public int Version => 2;
++
++        public TransferFormat TransferFormat => TransferFormat.Binary;
++
++        public bool IsVersionSupported(int version) => version <= Version;
++
++        #region Reading
++
++        public bool TryParseMessage(ref ReadOnlySequence<byte> input, IInvocationBinder binder, [NotNullWhen(true)] out HubMessage? message)
++        {
++            if (!tryParseFrame(ref input, out var payload))
++            {
++                message = null;
++                return false;
++            }
++
++            var reader = new MessagePackReader(payload);
++            message = parseMessage(ref reader, binder);
++            return message != null;
++        }
++
++        private static bool tryParseFrame(ref ReadOnlySequence<byte> buffer, out ReadOnlySequence<byte> payload)
++        {
++            const int max_length_prefix_size = 5;
++
++            payload = default;
++
++            if (buffer.IsEmpty)
++                return false;
++
++            // The payload starts with its length as a VarInt (7 bits per byte, least significant first, top bit = "more").
++            uint length = 0;
++            int numBytes = 0;
++
++            var prefixBuffer = buffer.Slice(0, Math.Min(max_length_prefix_size, buffer.Length));
++            ReadOnlySpan<byte> span = prefixBuffer.IsSingleSegment ? prefixBuffer.First.Span : prefixBuffer.ToArray();
++
++            byte byteRead;
++
++            do
++            {
++                byteRead = span[numBytes];
++                length |= (uint)(byteRead & 0x7f) << (numBytes * 7);
++                numBytes++;
++            } while (numBytes < prefixBuffer.Length && (byteRead & 0x80) != 0);
++
++            // size bytes are missing
++            if ((byteRead & 0x80) != 0 && numBytes < max_length_prefix_size)
++                return false;
++
++            if ((byteRead & 0x80) != 0 || (numBytes == max_length_prefix_size && byteRead > 7))
++                throw new FormatException("Messages over 2GB in size are not supported.");
++
++            // not enough data yet
++            if (buffer.Length < length + numBytes)
++                return false;
++
++            payload = buffer.Slice(numBytes, (int)length);
++            buffer = buffer.Slice(numBytes + (int)length);
++            return true;
++        }
++
++        private HubMessage? parseMessage(ref MessagePackReader reader, IInvocationBinder binder)
++        {
++            int itemCount = reader.ReadArrayHeader();
++            int messageType = readInt32(ref reader, "messageType");
++
++            switch (messageType)
++            {
++                case HubProtocolConstants.InvocationMessageType:
++                    return createInvocationMessage(ref reader, binder, itemCount);
++
++                case HubProtocolConstants.StreamInvocationMessageType:
++                    return createStreamInvocationMessage(ref reader, binder, itemCount);
++
++                case HubProtocolConstants.StreamItemMessageType:
++                    return createStreamItemMessage(ref reader, binder);
++
++                case HubProtocolConstants.CompletionMessageType:
++                    return createCompletionMessage(ref reader, binder);
++
++                case HubProtocolConstants.CancelInvocationMessageType:
++                {
++                    var headers = readHeaders(ref reader);
++                    string? invocationId = readString(ref reader, "invocationId");
++                    throwIfNullOrEmpty(invocationId, "invocation ID for CancelInvocation message");
++                    return applyHeaders(headers, new CancelInvocationMessage(invocationId));
++                }
++
++                case HubProtocolConstants.PingMessageType:
++                    return PingMessage.Instance;
++
++                case HubProtocolConstants.CloseMessageType:
++                    return createCloseMessage(ref reader, itemCount);
++
++                case HubProtocolConstants.AckMessageType:
++                    return new AckMessage(readInt64(ref reader, "sequenceId"));
++
++                case HubProtocolConstants.SequenceMessageType:
++                    return new SequenceMessage(readInt64(ref reader, "sequenceId"));
++
++                default:
++                    // Future protocol changes can add message types, old clients can ignore them
++                    return null;
++            }
++        }
++
++        private HubMessage createInvocationMessage(ref MessagePackReader reader, IInvocationBinder binder, int itemCount)
++        {
++            var headers = readHeaders(ref reader);
++            string? invocationId = readString(ref reader, "invocationId");
++
++            // An empty invocation ID means a non-blocking invocation.
++            if (string.IsNullOrEmpty(invocationId))
++                invocationId = null;
++
++            string? target = readTarget(ref reader, binder);
++            throwIfNullOrEmpty(target, "target for Invocation message");
++
++            object?[] arguments;
++
++            try
++            {
++                arguments = bindArguments(ref reader, binder.GetParameterTypes(target));
++            }
++            catch (Exception ex)
++            {
++                HbxlHubTypes.ReportFailure($"binding arguments of {target}", ex);
++                return new InvocationBindingFailureMessage(invocationId, target, ExceptionDispatchInfo.Capture(ex));
++            }
++
++            string[]? streams = null;
++            if (itemCount > 5)
++                streams = readStreamIds(ref reader);
++
++            return applyHeaders(headers, new InvocationMessage(invocationId, target, arguments, streams));
++        }
++
++        private HubMessage createStreamInvocationMessage(ref MessagePackReader reader, IInvocationBinder binder, int itemCount)
++        {
++            var headers = readHeaders(ref reader);
++            string? invocationId = readString(ref reader, "invocationId");
++            throwIfNullOrEmpty(invocationId, "invocation ID for StreamInvocation message");
++
++            string? target = readString(ref reader, "target");
++            throwIfNullOrEmpty(target, "target for StreamInvocation message");
++
++            object?[] arguments;
++
++            try
++            {
++                arguments = bindArguments(ref reader, binder.GetParameterTypes(target));
++            }
++            catch (Exception ex)
++            {
++                HbxlHubTypes.ReportFailure($"binding arguments of {target}", ex);
++                return new InvocationBindingFailureMessage(invocationId, target, ExceptionDispatchInfo.Capture(ex));
++            }
++
++            string[]? streams = null;
++            if (itemCount > 5)
++                streams = readStreamIds(ref reader);
++
++            return applyHeaders(headers, new StreamInvocationMessage(invocationId, target, arguments, streams));
++        }
++
++        private HubMessage createStreamItemMessage(ref MessagePackReader reader, IInvocationBinder binder)
++        {
++            var headers = readHeaders(ref reader);
++            string? invocationId = readString(ref reader, "invocationId");
++            throwIfNullOrEmpty(invocationId, "invocation ID for StreamItem message");
++
++            object? value;
++
++            try
++            {
++                value = deserializeObject(ref reader, binder.GetStreamItemType(invocationId), "item");
++            }
++            catch (Exception ex)
++            {
++                HbxlHubTypes.ReportFailure("binding a stream item", ex);
++                return new StreamBindingFailureMessage(invocationId, ExceptionDispatchInfo.Capture(ex));
++            }
++
++            return applyHeaders(headers, new StreamItemMessage(invocationId, value));
++        }
++
++        private CompletionMessage createCompletionMessage(ref MessagePackReader reader, IInvocationBinder binder)
++        {
++            var headers = readHeaders(ref reader);
++            string? invocationId = readString(ref reader, "invocationId");
++            throwIfNullOrEmpty(invocationId, "invocation ID for Completion message");
++
++            int resultKind = readInt32(ref reader, "resultKind");
++
++            string? error = null;
++            object? result = null;
++            bool hasResult = false;
++
++            switch (resultKind)
++            {
++                case error_result:
++                    error = readString(ref reader, "error");
++                    break;
++
++                case non_void_result:
++                    hasResult = true;
++
++                    Type? itemType;
++
++                    try
++                    {
++                        itemType = binder.GetReturnType(invocationId);
++                    }
++                    catch (Exception)
++                    {
++                        // the invocation is gone (cancelled, or the connection was restarted)
++                        itemType = null;
++                    }
++
++                    if (itemType == null)
++                        reader.Skip();
++                    else if (itemType == typeof(RawResult))
++                        result = new RawResult(reader.ReadRaw());
++                    else
++                    {
++                        try
++                        {
++                            result = deserializeObject(ref reader, itemType, "argument");
++                        }
++                        catch (Exception ex)
++                        {
++                            HbxlHubTypes.ReportFailure($"reading a result of type {itemType.Name}", ex);
++                            error = $"Error trying to deserialize result to {itemType.Name}. {ex.Message}";
++                            hasResult = false;
++                        }
++                    }
++
++                    break;
++
++                case void_result:
++                    break;
++
++                default:
++                    throw new InvalidDataException("Invalid invocation result kind.");
++            }
++
++            return applyHeaders(headers, new CompletionMessage(invocationId, error, result, hasResult));
++        }
++
++        private static CloseMessage createCloseMessage(ref MessagePackReader reader, int itemCount)
++        {
++            string? error = readString(ref reader, "error");
++            bool allowReconnect = false;
++
++            if (itemCount > 2)
++            {
++                try
++                {
++                    allowReconnect = reader.ReadBoolean();
++                }
++                catch (Exception ex)
++                {
++                    throw new InvalidDataException("Reading 'allowReconnect' as Boolean failed.", ex);
++                }
++            }
++
++            // An empty string is still an error
++            if (error == null && !allowReconnect)
++                return CloseMessage.Empty;
++
++            return new CloseMessage(error, allowReconnect);
++        }
++
++        private static Dictionary<string, string>? readHeaders(ref MessagePackReader reader)
++        {
++            long headerCount;
++
++            try
++            {
++                headerCount = reader.ReadMapHeader();
++            }
++            catch (Exception ex)
++            {
++                throw new InvalidDataException("Reading map length for 'headers' failed.", ex);
++            }
++
++            if (headerCount <= 0)
++                return null;
++
++            var headers = new Dictionary<string, string>(StringComparer.Ordinal);
++
++            for (int i = 0; i < headerCount; i++)
++            {
++                string? key = readString(ref reader, "headers.Key");
++                throwIfNullOrEmpty(key, "key in header");
++
++                string? value = readString(ref reader, "headers.Value");
++                throwIfNullOrEmpty(value, "value in header");
++
++                headers.Add(key, value);
++            }
++
++            return headers;
++        }
++
++        private static string[]? readStreamIds(ref MessagePackReader reader)
++        {
++            long count = readArrayLength(ref reader, "streamIds");
++
++            if (count <= 0)
++                return null;
++
++            var streams = new List<string>();
++
++            for (int i = 0; i < count; i++)
++            {
++                string? id = reader.ReadString();
++                throwIfNullOrEmpty(id, "value in streamIds received");
++                streams.Add(id);
++            }
++
++            return streams.ToArray();
++        }
++
++        private object?[] bindArguments(ref MessagePackReader reader, IReadOnlyList<Type> parameterTypes)
++        {
++            long argumentCount = readArrayLength(ref reader, "arguments");
++
++            if (parameterTypes.Count != argumentCount)
++                throw new InvalidDataException($"Invocation provides {argumentCount} argument(s) but target expects {parameterTypes.Count}.");
++
++            try
++            {
++                object?[] arguments = new object?[argumentCount];
++                for (int i = 0; i < argumentCount; i++)
++                    arguments[i] = deserializeObject(ref reader, parameterTypes[i], "argument");
++
++                return arguments;
++            }
++            catch (Exception ex)
++            {
++                throw new InvalidDataException("Error binding arguments. Make sure that the types of the provided values match the types of the hub method being invoked.", ex);
++            }
++        }
++
++        private object? deserializeObject(ref MessagePackReader reader, Type type, string field)
++        {
++            try
++            {
++                return HbxlHubTypes.Deserialize(ref reader, type, options);
++            }
++            catch (Exception ex)
++            {
++                throw new InvalidDataException($"Deserializing object of the `{type.Name}` type for '{field}' failed.", ex);
++            }
++        }
++
++        private static T applyHeaders<T>(Dictionary<string, string>? source, T destination)
++            where T : HubInvocationMessage
++        {
++            if (source != null && source.Count > 0)
++                destination.Headers = source;
++
++            return destination;
++        }
++
++        private static int readInt32(ref MessagePackReader reader, string field)
++        {
++            try
++            {
++                return reader.ReadInt32();
++            }
++            catch (Exception ex)
++            {
++                throw new InvalidDataException($"Reading '{field}' as Int32 failed.", ex);
++            }
++        }
++
++        private static long readInt64(ref MessagePackReader reader, string field)
++        {
++            try
++            {
++                return reader.ReadInt64();
++            }
++            catch (Exception ex)
++            {
++                throw new InvalidDataException($"Reading '{field}' as Int64 failed.", ex);
++            }
++        }
++
++        private static string? readTarget(ref MessagePackReader reader, IInvocationBinder binder)
++        {
++            try
++            {
++                if (reader.TryReadStringSpan(out var span))
++                    return binder.GetTarget(span) ?? Encoding.UTF8.GetString(span);
++
++                return reader.ReadString();
++            }
++            catch (Exception ex)
++            {
++                throw new InvalidDataException("Reading 'target' as String failed.", ex);
++            }
++        }
++
++        private static string? readString(ref MessagePackReader reader, string field)
++        {
++            try
++            {
++                return reader.ReadString();
++            }
++            catch (Exception ex)
++            {
++                throw new InvalidDataException($"Reading '{field}' as String failed.", ex);
++            }
++        }
++
++        private static long readArrayLength(ref MessagePackReader reader, string field)
++        {
++            try
++            {
++                return reader.ReadArrayHeader();
++            }
++            catch (Exception ex)
++            {
++                throw new InvalidDataException($"Reading array length for '{field}' failed.", ex);
++            }
++        }
++
++        private static void throwIfNullOrEmpty([NotNull] string? target, string message)
++        {
++            if (string.IsNullOrEmpty(target))
++                throw new InvalidDataException($"Null or empty {message}.");
++        }
++
++        #endregion
++
++        #region Writing
++
++        [ThreadStatic]
++        private static ArrayBufferWriter<byte>? cachedBuffer;
++
++        public void WriteMessage(HubMessage message, IBufferWriter<byte> output)
++        {
++            var buffer = writeToBuffer(message);
++
++            try
++            {
++                // length, then the message
++                Span<byte> prefix = stackalloc byte[5];
++                int prefixLength = writeLengthPrefix(buffer.WrittenCount, prefix);
++                output.Write(prefix.Slice(0, prefixLength));
++                output.Write(buffer.WrittenSpan);
++            }
++            finally
++            {
++                returnBuffer(buffer);
++            }
++        }
++
++        public ReadOnlyMemory<byte> GetMessageBytes(HubMessage message)
++        {
++            var buffer = writeToBuffer(message);
++
++            try
++            {
++                Span<byte> prefix = stackalloc byte[5];
++                int prefixLength = writeLengthPrefix(buffer.WrittenCount, prefix);
++
++                byte[] array = new byte[prefixLength + buffer.WrittenCount];
++                prefix.Slice(0, prefixLength).CopyTo(array);
++                buffer.WrittenSpan.CopyTo(array.AsSpan(prefixLength));
++                return array;
++            }
++            finally
++            {
++                returnBuffer(buffer);
++            }
++        }
++
++        private ArrayBufferWriter<byte> writeToBuffer(HubMessage message)
++        {
++            var buffer = cachedBuffer ?? new ArrayBufferWriter<byte>(256);
++            cachedBuffer = null;
++
++            try
++            {
++                var writer = new MessagePackWriter(buffer);
++                writeMessageCore(message, ref writer);
++                writer.Flush();
++                return buffer;
++            }
++            catch (Exception ex)
++            {
++                returnBuffer(buffer);
++                HbxlHubTypes.ReportFailure($"writing a {message.GetType().Name}{(message is HubMethodInvocationMessage m ? $" ({m.Target})" : string.Empty)}", ex);
++                throw;
++            }
++        }
++
++        private static void returnBuffer(ArrayBufferWriter<byte> buffer)
++        {
++            // keep small buffers only
++            if (buffer.Capacity > 64 * 1024)
++                return;
++
++            buffer.ResetWrittenCount();
++            cachedBuffer = buffer;
++        }
++
++        private static int writeLengthPrefix(long length, Span<byte> output)
++        {
++            int numBytes = 0;
++
++            do
++            {
++                ref byte current = ref output[numBytes];
++                current = (byte)(length & 0x7f);
++                length >>= 7;
++                if (length > 0)
++                    current |= 0x80;
++                numBytes++;
++            } while (length > 0);
++
++            return numBytes;
++        }
++
++        private void writeMessageCore(HubMessage message, ref MessagePackWriter writer)
++        {
++            switch (message)
++            {
++                case InvocationMessage invocation:
++                    writer.WriteArrayHeader(6);
++                    writer.Write(HubProtocolConstants.InvocationMessageType);
++                    packHeaders(invocation.Headers, ref writer);
++                    if (string.IsNullOrEmpty(invocation.InvocationId))
++                        writer.WriteNil();
++                    else
++                        writer.Write(invocation.InvocationId);
++                    writer.Write(invocation.Target);
++                    writeArguments(invocation.Arguments, ref writer);
++                    writeStreamIds(invocation.StreamIds, ref writer);
++                    break;
++
++                case StreamInvocationMessage streamInvocation:
++                    writer.WriteArrayHeader(6);
++                    writer.Write(HubProtocolConstants.StreamInvocationMessageType);
++                    packHeaders(streamInvocation.Headers, ref writer);
++                    writer.Write(streamInvocation.InvocationId);
++                    writer.Write(streamInvocation.Target);
++                    writeArguments(streamInvocation.Arguments, ref writer);
++                    writeStreamIds(streamInvocation.StreamIds, ref writer);
++                    break;
++
++                case StreamItemMessage streamItem:
++                    writer.WriteArrayHeader(4);
++                    writer.Write(HubProtocolConstants.StreamItemMessageType);
++                    packHeaders(streamItem.Headers, ref writer);
++                    writer.Write(streamItem.InvocationId);
++                    writeArgument(streamItem.Item, ref writer);
++                    break;
++
++                case CompletionMessage completion:
++                {
++                    int resultKind = completion.Error != null ? error_result : completion.HasResult ? non_void_result : void_result;
++
++                    writer.WriteArrayHeader(4 + (resultKind != void_result ? 1 : 0));
++                    writer.Write(HubProtocolConstants.CompletionMessageType);
++                    packHeaders(completion.Headers, ref writer);
++                    writer.Write(completion.InvocationId);
++                    writer.Write(resultKind);
++
++                    if (resultKind == error_result)
++                        writer.Write(completion.Error);
++                    else if (resultKind == non_void_result)
++                        writeArgument(completion.Result, ref writer);
++                    break;
++                }
++
++                case CancelInvocationMessage cancel:
++                    writer.WriteArrayHeader(3);
++                    writer.Write(HubProtocolConstants.CancelInvocationMessageType);
++                    packHeaders(cancel.Headers, ref writer);
++                    writer.Write(cancel.InvocationId);
++                    break;
++
++                case PingMessage:
++                    writer.WriteArrayHeader(1);
++                    writer.Write(HubProtocolConstants.PingMessageType);
++                    break;
++
++                case CloseMessage close:
++                    writer.WriteArrayHeader(3);
++                    writer.Write(HubProtocolConstants.CloseMessageType);
++                    if (string.IsNullOrEmpty(close.Error))
++                        writer.WriteNil();
++                    else
++                        writer.Write(close.Error);
++                    writer.Write(close.AllowReconnect);
++                    break;
++
++                case AckMessage ack:
++                    writer.WriteArrayHeader(2);
++                    writer.Write(HubProtocolConstants.AckMessageType);
++                    writer.Write(ack.SequenceId);
++                    break;
++
++                case SequenceMessage sequence:
++                    writer.WriteArrayHeader(2);
++                    writer.Write(HubProtocolConstants.SequenceMessageType);
++                    writer.Write(sequence.SequenceId);
++                    break;
++
++                default:
++                    throw new InvalidDataException($"Unexpected message type: {message.GetType().Name}");
++            }
++        }
++
++        private void writeArguments(object?[]? arguments, ref MessagePackWriter writer)
++        {
++            if (arguments == null)
++            {
++                writer.WriteArrayHeader(0);
++                return;
++            }
++
++            writer.WriteArrayHeader(arguments.Length);
++            foreach (object? argument in arguments)
++                writeArgument(argument, ref writer);
++        }
++
++        private void writeArgument(object? argument, ref MessagePackWriter writer)
++        {
++            if (argument == null)
++                writer.WriteNil();
++            else if (argument is RawResult result)
++                writer.WriteRaw(result.RawSerializedData);
++            else
++                HbxlHubTypes.Serialize(ref writer, argument, options);
++        }
++
++        private static void writeStreamIds(string[]? streamIds, ref MessagePackWriter writer)
++        {
++            if (streamIds == null)
++            {
++                writer.WriteArrayHeader(0);
++                return;
++            }
++
++            writer.WriteArrayHeader(streamIds.Length);
++            foreach (string streamId in streamIds)
++                writer.Write(streamId);
++        }
++
++        private static void packHeaders(IDictionary<string, string>? headers, ref MessagePackWriter writer)
++        {
++            if (headers == null)
++            {
++                writer.WriteMapHeader(0);
++                return;
++            }
++
++            writer.WriteMapHeader(headers.Count);
++
++            foreach (var header in headers)
++            {
++                writer.Write(header.Key);
++                writer.Write(header.Value);
++            }
++        }
++
++        #endregion
++    }
++
++    /// <summary>
++    /// The types <see cref="HbxlMessagePackHubProtocol"/> can put on the wire, each with code compiled ahead of time.
++    /// To support another hub method, add its argument and return types to <see cref="types"/> (and, for nullable structs,
++    /// arrays or enums that are members of other types, a formatter to <see cref="Resolver.formatters"/>), then add a case to
++    /// the self-test in console/osu-game.
++    /// </summary>
++    public static class HbxlHubTypes
++    {
++        /// <summary>
++        /// Serialisation failures so far (a type missing from the list, or data in an unexpected shape). Zero when all is well.
++        /// </summary>
++        public static int Failures;
++
++        /// <summary>
++        /// Invoked with a one-line description of each of the first few failures.
++        /// </summary>
++        public static Action<string>? FailureReported;
++
++        internal static void ReportFailure(string what, Exception ex)
++        {
++            // the first three as notifications (Important), up to 20 in the log, then silence
++            int count = System.Threading.Interlocked.Increment(ref Failures);
++            if (count > 20)
++                return;
++
++            string text = $"hub protocol: {what} failed: {ex.GetType().Name}: {ex.Message}";
++            for (var inner = ex.InnerException; inner != null; inner = inner.InnerException)
++                text += $" <- {inner.GetType().Name}: {inner.Message}";
++
++            osu.Framework.Logging.Logger.Log(text, osu.Framework.Logging.LoggingTarget.Network, count <= 3 ? osu.Framework.Logging.LogLevel.Important : osu.Framework.Logging.LogLevel.Verbose);
++            FailureReported?.Invoke(text);
++        }
++
++        private abstract class Erased
++        {
++            public abstract void Serialize(ref MessagePackWriter writer, object value, MessagePackSerializerOptions options);
++            public abstract object? Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options);
++        }
++
++        private sealed class Erased<T> : Erased
++        {
++            public override void Serialize(ref MessagePackWriter writer, object value, MessagePackSerializerOptions options)
++                => options.Resolver.GetFormatterWithVerify<T>().Serialize(ref writer, (T)value, options);
++
++            public override object? Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options)
++                => options.Resolver.GetFormatterWithVerify<T>().Deserialize(ref reader, options);
++        }
++
++        private static readonly Dictionary<Type, Erased> types = new Dictionary<Type, Erased>
++        {
++            // primitives
++            { typeof(bool), new Erased<bool>() },
++            { typeof(int), new Erased<int>() },
++            { typeof(long), new Erased<long>() },
++            { typeof(ulong), new Erased<ulong>() },
++            { typeof(double), new Erased<double>() },
++            { typeof(string), new Erased<string>() },
++            { typeof(int[]), new Erased<int[]>() },
++            { typeof(long[]), new Erased<long[]>() },
++
++            // metadata hub (IMetadataServer / IMetadataClient)
++            { typeof(UserStatus), new Erased<UserStatus>() },
++            { typeof(UserActivity), new Erased<UserActivity>() },
++            { typeof(UserPresence), new Erased<UserPresence>() },
++            { typeof(BeatmapUpdates), new Erased<BeatmapUpdates>() },
++            { typeof(DailyChallengeInfo), new Erased<DailyChallengeInfo>() },
++            { typeof(MultiplayerRoomScoreSetEvent), new Erased<MultiplayerRoomScoreSetEvent>() },
++            { typeof(MultiplayerPlaylistItemStats), new Erased<MultiplayerPlaylistItemStats>() },
++            { typeof(MultiplayerPlaylistItemStats[]), new Erased<MultiplayerPlaylistItemStats[]>() },
++        };
++
++        /// <summary>
++        /// Like <see cref="SignalRUnionWorkaroundResolver.OPTIONS"/>, with formatters for the constructed generic types
++        /// MessagePack would otherwise build at runtime.
++        /// </summary>
++        public static readonly MessagePackSerializerOptions OPTIONS = SignalRUnionWorkaroundResolver.OPTIONS.WithResolver(new Resolver());
++
++        public static void Serialize(ref MessagePackWriter writer, object value, MessagePackSerializerOptions options)
++        {
++            // Derived types are written as their listed base (UserActivity.InSoloGame as UserActivity: the union), which is
++            // also what SignalRUnionWorkaroundResolver does for them.
++            for (Type? type = value.GetType(); type != null && type != typeof(object); type = type.BaseType)
++            {
++                if (types.TryGetValue(type, out var erased))
++                {
++                    erased.Serialize(ref writer, value, options);
++                    return;
++                }
++            }
++
++            throw new NotSupportedException($"{value.GetType()} is not in the list of hub types (HbxlHubTypes).");
++        }
++
++        public static object? Deserialize(ref MessagePackReader reader, Type type, MessagePackSerializerOptions options)
++        {
++            Type? underlying = Nullable.GetUnderlyingType(type);
++
++            if (underlying != null)
++            {
++                if (reader.TryReadNil())
++                    return null;
++
++                type = underlying;
++            }
++
++            if (types.TryGetValue(type, out var erased))
++                return erased.Deserialize(ref reader, options);
++
++            if (type == typeof(object))
++            {
++                // a hub method declared with an object parameter: nothing here does that, skip the value
++                reader.Skip();
++                return null;
++            }
++
++            throw new NotSupportedException($"{type} is not in the list of hub types (HbxlHubTypes).");
++        }
++
++        private sealed class Resolver : IFormatterResolver
++        {
++            private static readonly Dictionary<Type, object> formatters = new Dictionary<Type, object>
++            {
++                { typeof(UserStatus), new UserStatusFormatter() },
++                { typeof(UserStatus?), new NullableFormatter<UserStatus>() },
++                { typeof(UserPresence?), new NullableFormatter<UserPresence>() },
++                { typeof(DailyChallengeInfo?), new NullableFormatter<DailyChallengeInfo>() },
++                { typeof(MultiplayerPlaylistItemStats[]), new ArrayFormatter<MultiplayerPlaylistItemStats>() },
++            };
++
++            public IMessagePackFormatter<T>? GetFormatter<T>()
++            {
++                if (formatters.TryGetValue(typeof(T), out object? formatter))
++                    return (IMessagePackFormatter<T>)formatter;
++
++                return SignalRUnionWorkaroundResolver.OPTIONS.Resolver.GetFormatter<T>();
++            }
++        }
++
++        /// <summary>
++        /// An enum as its integer value, which is what MessagePack's standard resolver writes (the server's side).
++        /// </summary>
++        internal sealed class UserStatusFormatter : IMessagePackFormatter<UserStatus>
++        {
++            public void Serialize(ref MessagePackWriter writer, UserStatus value, MessagePackSerializerOptions options) => writer.Write((int)value);
++
++            public UserStatus Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options) => (UserStatus)reader.ReadInt32();
++        }
++    }
++}
++
++#endif

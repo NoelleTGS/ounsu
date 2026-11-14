@@ -1,0 +1,120 @@
+Submodule wrappers/realm-core contains modified content
+diff --git a/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.cpp b/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.cpp
+index 659a605..bbec0ba 100644
+--- a/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.cpp
++++ b/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.cpp
+@@ -31,6 +31,25 @@ ExternalCommitHelper::ExternalCommitHelper(RealmCoordinator& parent, const Realm
+     , m_sg(DB::create(realm::make_in_realm_history(), config.path,
+                       DBOptions(parent.is_in_memory() ? DBOptions::Durability::MemOnly : DBOptions::Durability::Full,
+                                 parent.get_encryption_key().data())))
++#ifdef HBX_SWITCH2
++    // osu-HBLauncher (Switch 2, hbxl): no epoll/FIFO, so this generic helper is used, and upstream's
++    // notify_others() is a no-op. RealmCoordinator::wake_up_notifier_worker() relies on it, so a
++    // notifier registered while nothing is being written (osu!'s song select subscribing to beatmap
++    // sets) never got its initial results. notify_others() now releases this listener's wait; the
++    // listener re-arms the wait after every wake-up and only exits once the destructor sets m_closing.
++    , m_thread(std::async(std::launch::async, [=] {
++        auto tr = m_sg->start_read();
++        for (;;) {
++            m_sg->wait_for_change(tr);
++            if (m_closing.load())
++                break;
++            m_sg->enable_wait_for_change();
++            tr->end_read();
++            tr = m_sg->start_read();
++            m_parent.on_change();
++        }
++    }))
++#else
+     , m_thread(std::async(std::launch::async, [=] {
+         auto tr = m_sg->start_read();
+         while (m_sg->wait_for_change(tr)) {
+@@ -39,13 +58,30 @@ ExternalCommitHelper::ExternalCommitHelper(RealmCoordinator& parent, const Realm
+             m_parent.on_change();
+         }
+     }))
++#endif
+ {
+ }
+ 
+ ExternalCommitHelper::~ExternalCommitHelper()
+ {
++#ifdef HBX_SWITCH2
++    // A notify_others() racing with shutdown may re-arm the wait after a release: keep releasing
++    // until the listener has seen m_closing and exited.
++    m_closing = true;
++    do {
++        m_sg->wait_for_change_release();
++    } while (m_thread.wait_for(std::chrono::milliseconds(10)) != std::future_status::ready);
++#else
+     m_sg->wait_for_change_release();
+     m_thread.wait(); // Wait for the thread to exit
++#endif
+ }
+ 
++#ifdef HBX_SWITCH2
++void ExternalCommitHelper::notify_others()
++{
++    m_sg->wait_for_change_release();
++}
++#else
+ void ExternalCommitHelper::notify_others() {}
++#endif
+diff --git a/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.hpp b/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.hpp
+index a94e01e..531afc0 100644
+--- a/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.hpp
++++ b/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.hpp
+@@ -18,6 +18,7 @@
+ 
+ #include <realm/db.hpp>
+ 
++#include <atomic>
+ #include <future>
+ 
+ namespace realm {
+@@ -42,6 +43,11 @@ private:
+ 
+     // The listener thread
+     std::future<void> m_thread;
++
++#ifdef HBX_SWITCH2
++    // osu-HBLauncher: set by the destructor; the listener exits only when this is set.
++    std::atomic<bool> m_closing{false};
++#endif
+ };
+ 
+ } // namespace _impl
+diff --git a/wrappers/realm-core/src/realm/util/file.cpp b/wrappers/realm-core/src/realm/util/file.cpp
+index 3dcde11..d4ae98a 100644
+--- a/wrappers/realm-core/src/realm/util/file.cpp
++++ b/wrappers/realm-core/src/realm/util/file.cpp
+@@ -1743,9 +1743,14 @@ void File::MapBase::unmap() noexcept
+ bool File::MapBase::try_reserve(const File& file, AccessMode a, size_t size, SizeType offset,
+                                 util::WriteObserver* observer)
+ {
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(HBX_SWITCH2)
++    // HBX_SWITCH2 (osu-HBLauncher): hbxl can't place a file mapping inside a reserved range
++    // (no MAP_FIXED), so take the Windows path: callers fall back to one plain mapping per section.
++    static_cast<void>(file);
++    static_cast<void>(a);
++    static_cast<void>(size);
++    static_cast<void>(offset);
+     static_cast<void>(observer);
+-    // unsupported for now
+     return false;
+ #else
+     void* addr = ::mmap(0, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+diff --git a/wrappers/src/CMakeLists.txt b/wrappers/src/CMakeLists.txt
+index d6b9b39..18d55d4 100644
+--- a/wrappers/src/CMakeLists.txt
++++ b/wrappers/src/CMakeLists.txt
+@@ -33,7 +33,7 @@ endif()
+ 
+ add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/MP>)
+ 
+-add_library(realm-wrappers SHARED ${SOURCES} ${HEADERS})
++add_library(realm-wrappers STATIC ${SOURCES} ${HEADERS})
+ 
+ if(BUILD_APPLE_FRAMEWORK)
+     set_target_properties(realm-wrappers PROPERTIES

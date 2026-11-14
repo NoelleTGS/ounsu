@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Graphics probe for the osu! port: Veldrid (ppy.Veldrid, as osu-framework uses)
+       on the console's Vulkan driver and vi window.  Build with ./build.sh. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishAot>true</PublishAot>
+    <RuntimeIdentifier>linux-musl-arm64</RuntimeIdentifier>
+    <StaticExecutable>true</StaticExecutable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <StripSymbols>false</StripSymbols>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <ServerGarbageCollector>false</ServerGarbageCollector>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ppy.Veldrid" Version="4.9.69-ga405fe8484" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="obj/shaders/tri.vert.spv" LogicalName="tri.vert.spv" />
+    <EmbeddedResource Include="obj/shaders/tri.frag.spv" LogicalName="tri.frag.spv" />
+    <EmbeddedResource Include="obj/shaders/fs.vert.spv" LogicalName="fs.vert.spv" />
+    <EmbeddedResource Include="obj/shaders/solid.frag.spv" LogicalName="solid.frag.spv" />
+    <EmbeddedResource Include="obj/shaders/tex.frag.spv" LogicalName="tex.frag.spv" />
+    <EmbeddedResource Include="obj/shaders/idx.vert.spv" LogicalName="idx.vert.spv" />
+    <EmbeddedResource Include="obj/shaders/ubo.frag.spv" LogicalName="ubo.frag.spv" />
+    <EmbeddedResource Include="obj/shaders/ubotex.frag.spv" LogicalName="ubotex.frag.spv" />
+  </ItemGroup>
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="134217728" />
+    <RuntimeHostConfigurationOption Include="System.GC.RegionRange" Value="268435456" />
+    <!-- Resolved at link time: no dlopen on the console. libdl is hbxl_vk_shim.c. -->
+    <DirectPInvoke Include="libc" />
+    <DirectPInvoke Include="libdl.so.2" />
+    <DirectPInvoke Include="libdl" />
+    <DirectPInvoke Include="hbxl" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Desktop tool: scans osu!'s IL for value-type collections that Newtonsoft.Json builds by reflection and writes
+       an rd.xml for NativeAOT.  Usage: dotnet run -c Release (args: <dir with osu.Game.dll> <out rd.xml>) -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>

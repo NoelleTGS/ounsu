@@ -1,0 +1,1806 @@
+diff --git a/bindings/MySoundLibrary.cs b/bindings/MySoundLibrary.cs
+index ea89322..ffc939f 100644
+--- a/bindings/MySoundLibrary.cs
++++ b/bindings/MySoundLibrary.cs
+@@ -146,11 +146,15 @@ namespace mysoundlib_cs
+         public static extern void mslTrackSetFreqTempo(IntPtr track, double freq, double tempo);
+ 
+         [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
++#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
+         [SuppressGCTransition]
++#endif
+         public static extern byte mslTrackIsLoaded(IntPtr track);
+ 
+         [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
++#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
+         [SuppressGCTransition]
++#endif
+         public static extern byte mslTrackIsDone(IntPtr track);
+ 
+         [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
+@@ -160,14 +164,18 @@ namespace mysoundlib_cs
+         public static extern void mslTrackPause(IntPtr track);
+ 
+         [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
++#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
+         [SuppressGCTransition]
++#endif
+         public static extern byte mslTrackIsPlaying(IntPtr track);
+ 
+         [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
+         public static extern void mslTrackSetVolume(IntPtr track, double volume, double balance);
+ 
+         [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
++#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
+         [SuppressGCTransition]
++#endif
+         public static extern double mslTrackGetPosition(IntPtr track);
+ 
+         [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
+@@ -226,7 +234,9 @@ namespace mysoundlib_cs
+         public static extern void mslSamplePause(IntPtr sample);
+ 
+         [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
++#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
+         [SuppressGCTransition]
++#endif
+         public static extern byte mslSampleIsPlaying(IntPtr sample);
+ 
+         [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
+@@ -239,7 +249,9 @@ namespace mysoundlib_cs
+         public static extern void mslSampleSetFrequency(IntPtr sample, double rfreq);
+ 
+         [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
++#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
+         [SuppressGCTransition]
++#endif
+         public static extern byte mslSampleGetLoop(IntPtr sample);
+ 
+         [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
+diff --git a/library/Decoder.cs b/library/Decoder.cs
+index 3d20a47..ac6cc66 100644
+--- a/library/Decoder.cs
++++ b/library/Decoder.cs
+@@ -1,7 +1,9 @@
+ /* SPDX-License-Identifier: LGPL-2.1-only */
+ 
+ using FFmpeg.AutoGen;
++#if !HBXL_NO_BASS
+ using ManagedBass;
++#endif
+ using SDL;
+ 
+ namespace native_audio_library
+@@ -10,18 +12,26 @@ namespace native_audio_library
+     {
+         public static Decoder CreateDecoderWithPath(string filePath, DataCallback callback, SDL_AudioSpec audioSpec, bool isTrack)
+         {
++#if HBXL_NO_BASS
++            return new FFmpegDecoder(filePath, callback, audioSpec);
++#else
+             return Bass.CurrentDevice >= 0
+                 ? new BassDecoder(filePath, callback, audioSpec, isTrack)
+                 : new FFmpegDecoder(filePath, callback, audioSpec);
++#endif
+         }
+ 
+         public static Decoder CreateDecoder(IntPtr opaque, avio_alloc_context_read_packet_func read,
+             avio_alloc_context_seek_func seek,
+             DataCallback dataCallback, SDL_AudioSpec audioSpec, bool isTrack)
+         {
++#if HBXL_NO_BASS
++            return new FFmpegDecoder(opaque, read, seek, dataCallback, audioSpec);
++#else
+             return Bass.CurrentDevice >= 0
+                 ? new BassDecoder(opaque, read, seek, dataCallback, audioSpec, isTrack)
+                 : new FFmpegDecoder(opaque, read, seek, dataCallback, audioSpec);
++#endif
+         }
+ 
+         public delegate void DataCallback(ReadOnlySpan<byte> data, bool done);
+diff --git a/library/Mixer.cs b/library/Mixer.cs
+index ff996d9..13dfcce 100644
+--- a/library/Mixer.cs
++++ b/library/Mixer.cs
+@@ -57,7 +57,9 @@ namespace native_audio_library
+ 
+             lock (syncRoot)
+             {
+-                if (ret == null || sampleCount < ret.Length)
++                // HBXL fix: the upstream check was inverted (sampleCount < ret.Length), so the buffer shrank on smaller requests
++                // and never grew: with SDL resampling 44.1 -> 48 kHz the request size varies, and every larger one overflowed.
++                if (ret == null || ret.Length < sampleCount)
+                     ret = new float[sampleCount];
+ 
+                 bool useFilters = activeEffects.Count > 0;
+diff --git a/library/NativeAudioLibrary.cs b/library/NativeAudioLibrary.cs
+index 3bbf735..a05551f 100644
+--- a/library/NativeAudioLibrary.cs
++++ b/library/NativeAudioLibrary.cs
+@@ -1,727 +1,733 @@
+-/* SPDX-License-Identifier: LGPL-2.1-only */
+-
+-using FFmpeg.AutoGen;
+-using ManagedBass;
+-using ManagedBass.Mix;
+-using SDL;
+-using System.Runtime.InteropServices;
+-using System.Text;
+-// ReSharper disable InconsistentNaming
+-
+-namespace native_audio_library
+-{
+-    public static unsafe class NativeAudioLibrary
+-    {
+-        public static bool ToBool(this byte b) => b != 0;
+-
+-        public static byte ToIntBool(this bool b) => (byte)(b ? 1 : 0);
+-
+-        [StructLayout(LayoutKind.Sequential)]
+-        public struct LogFunc
+-        {
+-            public delegate* unmanaged[Cdecl]<byte*, void> FuncPtr;
+-        }
+-
+-        [StructLayout(LayoutKind.Sequential)]
+-        public struct DataCallbackFunc
+-        {
+-            public delegate* unmanaged[Cdecl]<nint, nint, int, byte, void> FuncPtr;
+-        }
+-
+-        [StructLayout(LayoutKind.Sequential)]
+-        public struct LoadLibraryFunc
+-        {
+-            public delegate* unmanaged[Cdecl]<byte*, nint> FuncPtr;
+-        }
+-
+-        [StructLayout(LayoutKind.Sequential)]
+-        public struct LoadSymbolFunc
+-        {
+-            public delegate* unmanaged[Cdecl]<nint, byte*, nint> FuncPtr;
+-        }
+-
+-        [StructLayout(LayoutKind.Sequential)]
+-        public struct CloseLibraryFunc
+-        {
+-            public delegate* unmanaged[Cdecl]<nint, void> FuncPtr;
+-        }
+-
+-        private static LogFunc? nativeLogger;
+-
+-        public static void Log(string msg)
+-        {
+-            if (nativeLogger is LogFunc log)
+-            {
+-                byte[] conv = Encoding.UTF8.GetBytes(msg + '\0');
+-                fixed (byte* ptr = conv)
+-                    log.FuncPtr(ptr);
+-            }
+-            else
+-            {
+-                Console.Error.WriteLine(msg);
+-            }
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSetLogFunction")]
+-        public static void mslSetLogFunction(LogFunc log)
+-        {
+-            nativeLogger = log;
+-        }
+-
+-        private static LoadLibraryFunc? loadLib;
+-        private static LoadSymbolFunc? loadSym;
+-        private static CloseLibraryFunc? closeLib;
+-
+-        public static nint LoadNativeLibrary(string name)
+-        {
+-            nint handle;
+-
+-            if (loadLib is LoadLibraryFunc load)
+-            {
+-                byte[] conv = Encoding.UTF8.GetBytes(name + '\0');
+-                fixed (byte* ptr = conv)
+-                    handle = load.FuncPtr(ptr);
+-            }
+-            else
+-            {
+-                handle = NativeLibrary.Load(name);
+-            }
+-
+-            if (handle == IntPtr.Zero)
+-                Log("Couldn't load a library: " + name);
+-
+-            return handle;
+-        }
+-
+-        public static void* GetSymbol(nint handle, string name)
+-        {
+-            nint symbol;
+-
+-            if (loadSym is LoadSymbolFunc sym)
+-            {
+-                byte[] conv = Encoding.UTF8.GetBytes(name + '\0');
+-                fixed (byte* ptr = conv)
+-                    symbol = sym.FuncPtr(handle, ptr);
+-            }
+-            else
+-            {
+-                symbol = NativeLibrary.GetExport(handle, name);
+-            }
+-
+-            if (symbol == IntPtr.Zero)
+-                Log("Couldn't load a symbol: " + name);
+-
+-            return (void*)symbol;
+-        }
+-
+-        public static void CloseNativeLibrary(nint handle)
+-        {
+-            if (closeLib is CloseLibraryFunc close)
+-                close.FuncPtr(handle);
+-            else
+-                NativeLibrary.Free(handle);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSetLibraryLoadFunctions")]
+-        public static void mslSetLibraryLoadFunctions(LoadLibraryFunc load,
+-            LoadSymbolFunc sym,
+-            CloseLibraryFunc close)
+-        {
+-            loadLib = load;
+-            loadSym = sym;
+-            closeLib = close;
+-
+-            NativeLibrary.SetDllImportResolver(typeof(SDL3).Assembly, (name, _, _) => LoadNativeLibrary(name));
+-            NativeLibrary.SetDllImportResolver(typeof(Bass).Assembly, (name, _, _) => LoadNativeLibrary(name));
+-            NativeLibrary.SetDllImportResolver(typeof(BassMix).Assembly, (name, _, _) => LoadNativeLibrary(name));
+-        }
+-
+-        private static IntPtr AllocHandle<T>(T obj) where T : class
+-        {
+-            return new ObjectHandle<T>(obj, GCHandleType.Normal).Handle;
+-        }
+-
+-        internal static T? ResolveHandle<T>(IntPtr ptr) where T : class
+-        {
+-            if (ptr == IntPtr.Zero)
+-                return null;
+-
+-            var handle = new ObjectHandle<T>(ptr);
+-            return handle.GetTarget(out T target) ? target : null;
+-        }
+-
+-        internal static bool UseResolvedHandle<T>(IntPtr ptr, Action<T> action) where T : class
+-        {
+-            var handle = ResolveHandle<T>(ptr);
+-            if (handle != null)
+-            {
+-                action(handle);
+-                return true;
+-            }
+-            else
+-            {
+-                return false;
+-            }
+-        }
+-
+-        internal static R UseResolvedHandle<T, R>(IntPtr ptr, R def, Func<T, R> action) where T : class
+-        {
+-            var handle = ResolveHandle<T>(ptr);
+-            if (handle != null)
+-            {
+-                return action(handle);
+-            }
+-            else
+-            {
+-                return def;
+-            }
+-        }
+-
+-        internal static void FreeHandle<T>(IntPtr ptr, bool dispose = false) where T : class
+-        {
+-            if (ptr != IntPtr.Zero)
+-            {
+-                var handle = new ObjectHandle<T>(ptr, true);
+-                if (dispose && handle.GetTarget(out var target) && target is IDisposable disposable)
+-                    disposable.Dispose();
+-
+-                handle.Dispose();
+-            }
+-        }
+-
+-        // MANAGER
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslCreateAudioManager")]
+-        public static IntPtr mslCreateAudioManager()
+-        {
+-            var driver = Environment.GetEnvironmentVariable("MSL_DRIVER") ?? string.Empty;
+-
+-            switch (driver)
+-            {
+-                case "asio":
+-                    return AllocHandle(new NAudioAsioManager());
+-
+-                default:
+-                    return AllocHandle(new SDL3AudioManager());
+-            }
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslDestroyAudioManager")]
+-        public static void mslDestroyAudioManager(IntPtr manager)
+-        {
+-            FreeHandle<AudioManager>(manager, true);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslOpenAudioDevice")]
+-        public static SDLBool mslOpenAudioDevice(IntPtr manager, byte* deviceName)
+-        {
+-            return UseResolvedHandle<AudioManager, SDLBool>(manager, false, man => man.OpenAudioDevice(Marshal.PtrToStringUTF8((IntPtr)deviceName)));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslGetAudioDeviceList")]
+-        public static byte** mslGetAudioDeviceList(IntPtr manager)
+-        {
+-            return (byte**)UseResolvedHandle<AudioManager, IntPtr>(manager, IntPtr.Zero, m =>
+-            {
+-                var list = m.GetAudioDeviceList();
+-                byte** ptrList = (byte**)NativeMemory.AllocZeroed((nuint)list.Length + 1, (nuint)sizeof(byte*));
+-
+-                for (int i = 0; i < list.Length; i++)
+-                {
+-                    byte[] conv = Encoding.UTF8.GetBytes(list[i]);
+-                    byte* ptr = (byte*)NativeMemory.AllocZeroed((nuint)conv.Length + 1, (nuint)sizeof(byte));
+-                    Marshal.Copy(conv, 0, (IntPtr)ptr, conv.Length);
+-                    ptrList[i] = ptr;
+-                }
+-
+-                return (IntPtr)ptrList;
+-            });
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslFreeAudioDeviceList")]
+-        public static void mslFreeAudioDeviceList(byte** list)
+-        {
+-            byte** listPtr = list;
+-            while (*listPtr != null)
+-            {
+-                NativeMemory.Free(*listPtr);
+-                listPtr++;
+-            }
+-
+-            NativeMemory.Free(list);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslCloseAudioDevice")]
+-        public static void mslCloseAudioDevice(IntPtr manager)
+-        {
+-            UseResolvedHandle<AudioManager>(manager, man => man.CloseAudioDevice());
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslAddMixer")]
+-        public static void mslAddMixer(IntPtr manager, IntPtr mixer)
+-        {
+-            UseResolvedHandle<AudioManager>(manager, man => UseResolvedHandle<Mixer>(mixer, man.AddMixer));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslRemoveMixer")]
+-        public static void mslRemoveMixer(IntPtr manager, IntPtr mixer)
+-        {
+-            UseResolvedHandle<AudioManager>(manager, man => UseResolvedHandle<Mixer>(mixer, man.RemoveMixer));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslGetAudioFormat")]
+-        public static void mslGetAudioFormat(int* freq, int* channels, SDL_AudioFormat* format)
+-        {
+-            var spec = AudioManager.SPEC;
+-
+-            if (freq != null)
+-                *freq = spec.freq;
+-
+-            if (channels != null)
+-                *channels = spec.channels;
+-
+-            if (format != null)
+-                *format = spec.format;
+-        }
+-
+-        // MIXER
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslCreateMixer")]
+-        public static IntPtr mslCreateMixer()
+-        {
+-            return AllocHandle(new Mixer());
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslDestroyMixer")]
+-        public static void mslDestroyMixer(IntPtr mixer)
+-        {
+-            FreeHandle<Mixer>(mixer);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslMixerAddTrack")]
+-        public static void mslMixerAddTrack(IntPtr mixer, IntPtr channel, byte autoRemove)
+-        {
+-            UseResolvedHandle<Mixer>(mixer,
+-                mix => UseResolvedHandle<Track>(channel, track => mix.AddChannel(track, autoRemove.ToBool())));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslMixerRemoveTrack")]
+-        public static void mslMixerRemoveTrack(IntPtr mixer, IntPtr channel)
+-        {
+-            UseResolvedHandle<Mixer>(mixer,
+-                mix => UseResolvedHandle<Track>(channel, mix.RemoveChannel));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslMixerAddSample")]
+-        public static void mslMixerAddSample(IntPtr mixer, IntPtr channel, byte autoRemove)
+-        {
+-            UseResolvedHandle<Mixer>(mixer,
+-                mix => UseResolvedHandle<Sample>(channel, sample => mix.AddChannel(sample, autoRemove.ToBool())));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslMixerRemoveSample")]
+-        public static void mslMixerRemoveSample(IntPtr mixer, IntPtr channel)
+-        {
+-            UseResolvedHandle<Mixer>(mixer,
+-                mix => UseResolvedHandle<Sample>(channel, mix.RemoveChannel));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslMixerSetVolume")]
+-        public static void mslMixerSetVolume(IntPtr mixer, double volume)
+-        {
+-            UseResolvedHandle<Mixer>(mixer, mix => mix.Volume = volume);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslApplyBiquadFilter")]
+-        public static IntPtr mslApplyBiquadFilter(IntPtr mixer, IntPtr param, int priority)
+-        {
+-            using var pa = new ObjectHandle<BiQuadParameter>(param, true);
+-            if (pa.GetTarget(out BiQuadParameter target))
+-            {
+-                return UseResolvedHandle<Mixer, int>(mixer, 0, m => m.AddEffect(priority, target.type, target.fGain, target.freq, target.fCenter, target.fQ));
+-            }
+-
+-            return IntPtr.Zero;
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslUpdateBiquadFilter")]
+-        public static void mslUpdateBiquadFilter(IntPtr mixer, IntPtr param, IntPtr entry)
+-        {
+-            using var pa = new ObjectHandle<BiQuadParameter>(param, true);
+-            if (pa.GetTarget(out BiQuadParameter target))
+-            {
+-                UseResolvedHandle<Mixer>(mixer, m => m.UpdateEffect((int)entry, target.type, target.fGain, target.freq, target.fCenter, target.fQ));
+-            }
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslRemoveBiquadFilter")]
+-        public static void mslRemoveBiquadFilter(IntPtr mixer, IntPtr entry)
+-        {
+-            UseResolvedHandle<Mixer>(mixer, m => m.RemoveEffect((int)entry));
+-        }
+-
+-        // BIQUAD
+-
+-        public enum BiQuadType
+-        {
+-            LPF = 0, /* low pass filter */
+-            HPF = 1, /* High pass filter */
+-            BPF = 2, /* band pass filter */
+-            BPQ = 3, /* band pass filter (constant skirt gain) */
+-            NOTCH = 4, /* Notch Filter */
+-            PEQ = 5, /* Peaking band EQ filter */
+-            LSH = 6, /* Low shelf filter */
+-            HSH = 7, /* High shelf filter */
+-            APF = 8 /* all pass filter */
+-        }
+-
+-        private class BiQuadParameter
+-        {
+-            public BiQuadType type;
+-            public float freq;
+-            public float fGain;
+-            public float fCenter;
+-            public float fQ;
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslBiQuadUpdate")]
+-        public static IntPtr mslBiQuadUpdate(BiQuadType type, double dbGain, double freq, double srate, double q)
+-        {
+-            return AllocHandle(new BiQuadParameter
+-            {
+-                type = type,
+-                freq = (float)srate,
+-                fCenter = (float)freq,
+-                fGain = (float)dbGain,
+-                fQ = (float)q
+-            });
+-        }
+-
+-        // TRACK
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslCreateTrack")]
+-        public static IntPtr mslCreateTrack()
+-        {
+-            return AllocHandle(new Track());
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslCreateTrackDecoder")]
+-        public static IntPtr mslCreateTrackDecoder(IntPtr track, IntPtr opaque, avio_alloc_context_read_packet_func read, avio_alloc_context_seek_func seek)
+-        {
+-            var decoder = UseResolvedHandle<Track, Decoder?>(track, null, t => t.GetDecoder(opaque, read, seek));
+-            return decoder != null ? AllocHandle(decoder) : IntPtr.Zero;
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslCreateTrackDecoderWithPath")]
+-        public static IntPtr mslCreateTrackDecoderWithPath(IntPtr track, byte* path)
+-        {
+-            var decoder = UseResolvedHandle<Track, Decoder?>(track, null, t =>
+-            {
+-                var str = Marshal.PtrToStringUTF8((IntPtr)path);
+-                return str != null ? t.GetDecoderWithPath(str) : null;
+-            });
+-
+-            return decoder != null ? AllocHandle(decoder) : IntPtr.Zero;
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslDestroyTrack")]
+-        public static void mslDestroyTrack(IntPtr track)
+-        {
+-            FreeHandle<Track>(track, true);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackSetFreqTempo")]
+-        public static void mslTrackSetFreqTempo(IntPtr track, double freq, double tempo)
+-        {
+-            UseResolvedHandle<Track>(track, t => t.Player.SetFreqTempo(freq, tempo));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackIsLoaded")]
+-        public static SDLBool mslTrackIsLoaded(IntPtr track)
+-        {
+-            return UseResolvedHandle<Track, SDLBool>(track, false, t => t.Player.IsLoaded);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackIsDone")]
+-        public static SDLBool mslTrackIsDone(IntPtr track)
+-        {
+-            return UseResolvedHandle<Track, SDLBool>(track, false, t => t.Player.Done);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackPlay")]
+-        public static void mslTrackPlay(IntPtr track)
+-        {
+-            UseResolvedHandle<Track>(track, t => t.Playing = true);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackPause")]
+-        public static void mslTrackPause(IntPtr track)
+-        {
+-            UseResolvedHandle<Track>(track, t => t.Playing = false);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackIsPlaying")]
+-        public static SDLBool mslTrackIsPlaying(IntPtr track)
+-        {
+-            return UseResolvedHandle<Track, SDLBool>(track, false, t => t.Playing);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackSetVolume")]
+-        public static void mslTrackSetVolume(IntPtr track, double volume, double balance)
+-        {
+-            UseResolvedHandle<Track>(track, t => (t as IAudioChannel).SetVolume((float)volume, (float)balance));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackGetPosition")]
+-        public static double mslTrackGetPosition(IntPtr track)
+-        {
+-            return UseResolvedHandle<Track, double>(track, 0.0, t => t.Player.GetCurrentTime());
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackSetPosition")]
+-        public static double mslTrackSetPosition(IntPtr track, double position)
+-        {
+-            return UseResolvedHandle<Track, double>(track, 0.0, t => t.Player.Seek(position));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackSetLoop")]
+-        public static void mslTrackSetLoop(IntPtr track, byte loop)
+-        {
+-            UseResolvedHandle<Track>(track, t => t.Player.Looping = loop.ToBool());
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackSetRestartPoint")]
+-        public static void mslTrackSetRestartPoint(IntPtr track, double position)
+-        {
+-            UseResolvedHandle<Track>(track, t => t.Player.LoopPoint = position);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackUpdate")]
+-        public static void mslTrackUpdate(IntPtr track)
+-        {
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackGetLength")]
+-        public static double mslTrackGetLength(IntPtr track)
+-        {
+-            return UseResolvedHandle<Track, double>(track, 0.0, t => t.Player.AudioLength);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackCalculateLoudness")]
+-        public static double mslTrackCalculateLoudness(IntPtr track)
+-        {
+-            return double.NegativeInfinity;
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslTrackCalculateCurrent")]
+-        public static int mslTrackCalculateCurrent(IntPtr track, byte movePos, int points, int nfft, float* fft, float* lrAmps, nuint* pointLen)
+-        {
+-            return UseResolvedHandle<Track, int>(track, -1000, t =>
+-            {
+-                var fftSpan = new Span<float>(fft, nfft / 2);
+-                var ampSpan = new Span<float>(lrAmps, points * 2);
+-                int ret = t.Player.CalculateAmplitude(movePos.ToBool(), fftSpan, ampSpan, out var len);
+-
+-                if (pointLen != null)
+-                    *pointLen = (nuint)len;
+-
+-                return ret;
+-            });
+-        }
+-
+-        // SAMPLEFACTORY
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslCreateSampleFactory")]
+-        public static IntPtr mslCreateSampleFactory()
+-        {
+-            return AllocHandle(new SampleFactory());
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslRunSampleFactoryDecoder")]
+-        public static void mslRunSampleFactoryDecoder(IntPtr factory, IntPtr opaque, avio_alloc_context_read_packet_func read, avio_alloc_context_seek_func seek)
+-        {
+-            UseResolvedHandle<SampleFactory>(factory, f => f.RunDecoder(opaque, read, seek));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslRunSampleFactoryDecoderWithPath")]
+-        public static void mslRunSampleFactoryDecoderWithPath(IntPtr factory, byte* path)
+-        {
+-            var str = Marshal.PtrToStringUTF8((IntPtr)path);
+-
+-            if (str != null)
+-                UseResolvedHandle<SampleFactory>(factory, f => f.RunDecoderWithPath(str));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslDestroySampleFactory")]
+-        public static void mslDestroySampleFactory(IntPtr factory)
+-        {
+-            FreeHandle<SampleFactory>(factory);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSampleFactoryGetLength")]
+-        public static double mslSampleFactoryGetLength(IntPtr factory)
+-        {
+-            return UseResolvedHandle<SampleFactory, double>(factory, 0.0, f => f.Length);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSampleFactoryIsLoaded")]
+-        public static SDLBool mslSampleFactoryIsLoaded(IntPtr factory)
+-        {
+-            return UseResolvedHandle<SampleFactory, SDLBool>(factory, false, f => f.GetAudioData().Length > 0);
+-        }
+-
+-        // SAMPLE
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslCreateSample")]
+-        public static IntPtr mslCreateSample(IntPtr factory)
+-        {
+-            var ret = UseResolvedHandle<SampleFactory, IntPtr>(factory, IntPtr.Zero, f => AllocHandle(new Sample(f)));
+-            if (ret == IntPtr.Zero)
+-                return AllocHandle(new Sample(null));
+-
+-            return ret;
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslDestroySample")]
+-        public static void mslDestroySample(IntPtr sample)
+-        {
+-            FreeHandle<Sample>(sample);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSamplePlay")]
+-        public static void mslSamplePlay(IntPtr sample)
+-        {
+-            UseResolvedHandle<Sample>(sample, s => s.Playing = true);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSamplePause")]
+-        public static void mslSamplePause(IntPtr sample)
+-        {
+-            UseResolvedHandle<Sample>(sample, s => s.Playing = false);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSampleIsPlaying")]
+-        public static SDLBool mslSampleIsPlaying(IntPtr sample)
+-        {
+-            return UseResolvedHandle<Sample, SDLBool>(sample, false, s => s.Playing);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSampleSetVolume")]
+-        public static void mslSampleSetVolume(IntPtr sample, double volume, double balance)
+-        {
+-            UseResolvedHandle<Sample>(sample, s => (s as IAudioChannel).SetVolume((float)volume, (float)balance));
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSampleGetFrequency")]
+-        public static double mslSampleGetFrequency(IntPtr sample)
+-        {
+-            return UseResolvedHandle<Sample, double>(sample, 1.0, s => s.Rate);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSampleSetFrequency")]
+-        public static void mslSampleSetFrequency(IntPtr sample, double rfreq)
+-        {
+-            UseResolvedHandle<Sample>(sample, s => s.Rate = rfreq);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSampleGetLoop")]
+-        public static SDLBool mslSampleGetLoop(IntPtr sample)
+-        {
+-            return UseResolvedHandle<Sample, SDLBool>(sample, false, s => s.Looping);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSampleSetLoop")]
+-        public static void mslSampleSetLoop(IntPtr sample, byte loop)
+-        {
+-            UseResolvedHandle<Sample>(sample, s => s.Looping = loop.ToBool());
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslSampleIsDone")]
+-        public static SDLBool mslSampleIsDone(IntPtr sample)
+-        {
+-            return UseResolvedHandle<Sample, SDLBool>(sample, true, s => s.Player.Done);
+-        }
+-
+-        // DECODER
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslCreateAudioDecoder")]
+-        public static IntPtr mslCreateAudioDecoder(IntPtr opaque, avio_alloc_context_read_packet_func read, avio_alloc_context_seek_func seek,
+-            SDL_AudioSpec spec, byte isTrack, IntPtr userdata, DataCallbackFunc callback)
+-        {
+-            Decoder.DataCallback cb = (data, done) =>
+-            {
+-                fixed (byte* ptr = data)
+-                    callback.FuncPtr(userdata, (IntPtr)ptr, data.Length, done.ToIntBool());
+-            };
+-
+-            var decoder = Decoder.CreateDecoder(opaque, read, seek, cb, spec, isTrack.ToBool());
+-            return AllocHandle(decoder);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslCreateAudioDecoderWithPath")]
+-        public static IntPtr mslCreateAudioDecoderWithPath(byte* path,
+-            SDL_AudioSpec spec, byte isTrack, IntPtr userdata, DataCallbackFunc callback)
+-        {
+-            var str = Marshal.PtrToStringUTF8((IntPtr)path);
+-            if (str == null)
+-                return IntPtr.Zero;
+-
+-            Decoder.DataCallback cb = (data, done) =>
+-            {
+-                fixed (byte* ptr = data)
+-                    callback.FuncPtr(userdata, (IntPtr)ptr, data.Length, done.ToIntBool());
+-            };
+-
+-            var decoder = Decoder.CreateDecoderWithPath(str, cb, spec, isTrack.ToBool());
+-            return AllocHandle(decoder);
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslDestroyAudioDecoder")]
+-        public static void mslDestroyAudioDecoder(IntPtr* decoderptr)
+-        {
+-            if (decoderptr == null)
+-                return;
+-
+-            IntPtr decoder = *decoderptr;
+-
+-            if (decoder == IntPtr.Zero)
+-                return;
+-
+-            using var handle = new ObjectHandle<Decoder>(decoder, true);
+-            if (handle.GetTarget(out var d))
+-                d.Dispose();
+-
+-            *decoderptr = IntPtr.Zero;
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslDecoderGetMetadata")]
+-        public static void mslDecoderGetMetadata(IntPtr decoder, int* bitrate, double* length, nuint* bytelen)
+-        {
+-            UseResolvedHandle<Decoder>(decoder, d =>
+-            {
+-                d.GetMetadata(out var br, out var len, out var blen);
+-
+-                if (bitrate != null)
+-                    *bitrate = br;
+-
+-                if (length != null)
+-                    *length = len;
+-
+-                if (bytelen != null)
+-                    *bytelen = (nuint)blen;
+-            });
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslDecoderProcessChunk")]
+-        public static int mslDecoderProcessChunk(IntPtr decoder)
+-        {
+-            return UseResolvedHandle<Decoder, int>(decoder, 0, d => d.ProcessChunk());
+-        }
+-
+-        [UnmanagedCallersOnly(EntryPoint = "mslDecoderIsDone")]
+-        public static SDLBool mslDecoderIsDone(IntPtr decoder)
+-        {
+-            return UseResolvedHandle<Decoder, SDLBool>(decoder, true, d => d.Done);
+-        }
+-    }
+-}
++/* SPDX-License-Identifier: LGPL-2.1-only */
++
++using FFmpeg.AutoGen;
++#if !HBXL_NO_BASS
++using ManagedBass;
++using ManagedBass.Mix;
++#endif
++using SDL;
++using System.Runtime.InteropServices;
++using System.Text;
++// ReSharper disable InconsistentNaming
++
++namespace native_audio_library
++{
++    public static unsafe class NativeAudioLibrary
++    {
++        public static bool ToBool(this byte b) => b != 0;
++
++        public static byte ToIntBool(this bool b) => (byte)(b ? 1 : 0);
++
++        [StructLayout(LayoutKind.Sequential)]
++        public struct LogFunc
++        {
++            public delegate* unmanaged[Cdecl]<byte*, void> FuncPtr;
++        }
++
++        [StructLayout(LayoutKind.Sequential)]
++        public struct DataCallbackFunc
++        {
++            public delegate* unmanaged[Cdecl]<nint, nint, int, byte, void> FuncPtr;
++        }
++
++        [StructLayout(LayoutKind.Sequential)]
++        public struct LoadLibraryFunc
++        {
++            public delegate* unmanaged[Cdecl]<byte*, nint> FuncPtr;
++        }
++
++        [StructLayout(LayoutKind.Sequential)]
++        public struct LoadSymbolFunc
++        {
++            public delegate* unmanaged[Cdecl]<nint, byte*, nint> FuncPtr;
++        }
++
++        [StructLayout(LayoutKind.Sequential)]
++        public struct CloseLibraryFunc
++        {
++            public delegate* unmanaged[Cdecl]<nint, void> FuncPtr;
++        }
++
++        private static LogFunc? nativeLogger;
++
++        public static void Log(string msg)
++        {
++            if (nativeLogger is LogFunc log)
++            {
++                byte[] conv = Encoding.UTF8.GetBytes(msg + '\0');
++                fixed (byte* ptr = conv)
++                    log.FuncPtr(ptr);
++            }
++            else
++            {
++                Console.Error.WriteLine(msg);
++            }
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSetLogFunction")]
++        public static void mslSetLogFunction(LogFunc log)
++        {
++            nativeLogger = log;
++        }
++
++        private static LoadLibraryFunc? loadLib;
++        private static LoadSymbolFunc? loadSym;
++        private static CloseLibraryFunc? closeLib;
++
++        public static nint LoadNativeLibrary(string name)
++        {
++            nint handle;
++
++            if (loadLib is LoadLibraryFunc load)
++            {
++                byte[] conv = Encoding.UTF8.GetBytes(name + '\0');
++                fixed (byte* ptr = conv)
++                    handle = load.FuncPtr(ptr);
++            }
++            else
++            {
++                handle = NativeLibrary.Load(name);
++            }
++
++            if (handle == IntPtr.Zero)
++                Log("Couldn't load a library: " + name);
++
++            return handle;
++        }
++
++        public static void* GetSymbol(nint handle, string name)
++        {
++            nint symbol;
++
++            if (loadSym is LoadSymbolFunc sym)
++            {
++                byte[] conv = Encoding.UTF8.GetBytes(name + '\0');
++                fixed (byte* ptr = conv)
++                    symbol = sym.FuncPtr(handle, ptr);
++            }
++            else
++            {
++                symbol = NativeLibrary.GetExport(handle, name);
++            }
++
++            if (symbol == IntPtr.Zero)
++                Log("Couldn't load a symbol: " + name);
++
++            return (void*)symbol;
++        }
++
++        public static void CloseNativeLibrary(nint handle)
++        {
++            if (closeLib is CloseLibraryFunc close)
++                close.FuncPtr(handle);
++            else
++                NativeLibrary.Free(handle);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSetLibraryLoadFunctions")]
++        public static void mslSetLibraryLoadFunctions(LoadLibraryFunc load,
++            LoadSymbolFunc sym,
++            CloseLibraryFunc close)
++        {
++            loadLib = load;
++            loadSym = sym;
++            closeLib = close;
++
++#if !HBXL_NO_BASS // HBXL: one binary; SDL3 is the host's (osu-framework's) and already bound
++            NativeLibrary.SetDllImportResolver(typeof(SDL3).Assembly, (name, _, _) => LoadNativeLibrary(name));
++            NativeLibrary.SetDllImportResolver(typeof(Bass).Assembly, (name, _, _) => LoadNativeLibrary(name));
++            NativeLibrary.SetDllImportResolver(typeof(BassMix).Assembly, (name, _, _) => LoadNativeLibrary(name));
++#endif
++        }
++
++        private static IntPtr AllocHandle<T>(T obj) where T : class
++        {
++            return new ObjectHandle<T>(obj, GCHandleType.Normal).Handle;
++        }
++
++        internal static T? ResolveHandle<T>(IntPtr ptr) where T : class
++        {
++            if (ptr == IntPtr.Zero)
++                return null;
++
++            var handle = new ObjectHandle<T>(ptr);
++            return handle.GetTarget(out T target) ? target : null;
++        }
++
++        internal static bool UseResolvedHandle<T>(IntPtr ptr, Action<T> action) where T : class
++        {
++            var handle = ResolveHandle<T>(ptr);
++            if (handle != null)
++            {
++                action(handle);
++                return true;
++            }
++            else
++            {
++                return false;
++            }
++        }
++
++        internal static R UseResolvedHandle<T, R>(IntPtr ptr, R def, Func<T, R> action) where T : class
++        {
++            var handle = ResolveHandle<T>(ptr);
++            if (handle != null)
++            {
++                return action(handle);
++            }
++            else
++            {
++                return def;
++            }
++        }
++
++        internal static void FreeHandle<T>(IntPtr ptr, bool dispose = false) where T : class
++        {
++            if (ptr != IntPtr.Zero)
++            {
++                var handle = new ObjectHandle<T>(ptr, true);
++                if (dispose && handle.GetTarget(out var target) && target is IDisposable disposable)
++                    disposable.Dispose();
++
++                handle.Dispose();
++            }
++        }
++
++        // MANAGER
++
++        [UnmanagedCallersOnly(EntryPoint = "mslCreateAudioManager")]
++        public static IntPtr mslCreateAudioManager()
++        {
++            var driver = Environment.GetEnvironmentVariable("MSL_DRIVER") ?? string.Empty;
++
++            switch (driver)
++            {
++#if !HBXL_NO_BASS
++                case "asio":
++                    return AllocHandle(new NAudioAsioManager());
++#endif
++
++                default:
++                    return AllocHandle(new SDL3AudioManager());
++            }
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslDestroyAudioManager")]
++        public static void mslDestroyAudioManager(IntPtr manager)
++        {
++            FreeHandle<AudioManager>(manager, true);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslOpenAudioDevice")]
++        public static SDLBool mslOpenAudioDevice(IntPtr manager, byte* deviceName)
++        {
++            return UseResolvedHandle<AudioManager, SDLBool>(manager, false, man => man.OpenAudioDevice(Marshal.PtrToStringUTF8((IntPtr)deviceName)));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslGetAudioDeviceList")]
++        public static byte** mslGetAudioDeviceList(IntPtr manager)
++        {
++            return (byte**)UseResolvedHandle<AudioManager, IntPtr>(manager, IntPtr.Zero, m =>
++            {
++                var list = m.GetAudioDeviceList();
++                byte** ptrList = (byte**)NativeMemory.AllocZeroed((nuint)list.Length + 1, (nuint)sizeof(byte*));
++
++                for (int i = 0; i < list.Length; i++)
++                {
++                    byte[] conv = Encoding.UTF8.GetBytes(list[i]);
++                    byte* ptr = (byte*)NativeMemory.AllocZeroed((nuint)conv.Length + 1, (nuint)sizeof(byte));
++                    Marshal.Copy(conv, 0, (IntPtr)ptr, conv.Length);
++                    ptrList[i] = ptr;
++                }
++
++                return (IntPtr)ptrList;
++            });
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslFreeAudioDeviceList")]
++        public static void mslFreeAudioDeviceList(byte** list)
++        {
++            byte** listPtr = list;
++            while (*listPtr != null)
++            {
++                NativeMemory.Free(*listPtr);
++                listPtr++;
++            }
++
++            NativeMemory.Free(list);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslCloseAudioDevice")]
++        public static void mslCloseAudioDevice(IntPtr manager)
++        {
++            UseResolvedHandle<AudioManager>(manager, man => man.CloseAudioDevice());
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslAddMixer")]
++        public static void mslAddMixer(IntPtr manager, IntPtr mixer)
++        {
++            UseResolvedHandle<AudioManager>(manager, man => UseResolvedHandle<Mixer>(mixer, man.AddMixer));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslRemoveMixer")]
++        public static void mslRemoveMixer(IntPtr manager, IntPtr mixer)
++        {
++            UseResolvedHandle<AudioManager>(manager, man => UseResolvedHandle<Mixer>(mixer, man.RemoveMixer));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslGetAudioFormat")]
++        public static void mslGetAudioFormat(int* freq, int* channels, SDL_AudioFormat* format)
++        {
++            var spec = AudioManager.SPEC;
++
++            if (freq != null)
++                *freq = spec.freq;
++
++            if (channels != null)
++                *channels = spec.channels;
++
++            if (format != null)
++                *format = spec.format;
++        }
++
++        // MIXER
++
++        [UnmanagedCallersOnly(EntryPoint = "mslCreateMixer")]
++        public static IntPtr mslCreateMixer()
++        {
++            return AllocHandle(new Mixer());
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslDestroyMixer")]
++        public static void mslDestroyMixer(IntPtr mixer)
++        {
++            FreeHandle<Mixer>(mixer);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslMixerAddTrack")]
++        public static void mslMixerAddTrack(IntPtr mixer, IntPtr channel, byte autoRemove)
++        {
++            UseResolvedHandle<Mixer>(mixer,
++                mix => UseResolvedHandle<Track>(channel, track => mix.AddChannel(track, autoRemove.ToBool())));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslMixerRemoveTrack")]
++        public static void mslMixerRemoveTrack(IntPtr mixer, IntPtr channel)
++        {
++            UseResolvedHandle<Mixer>(mixer,
++                mix => UseResolvedHandle<Track>(channel, mix.RemoveChannel));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslMixerAddSample")]
++        public static void mslMixerAddSample(IntPtr mixer, IntPtr channel, byte autoRemove)
++        {
++            UseResolvedHandle<Mixer>(mixer,
++                mix => UseResolvedHandle<Sample>(channel, sample => mix.AddChannel(sample, autoRemove.ToBool())));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslMixerRemoveSample")]
++        public static void mslMixerRemoveSample(IntPtr mixer, IntPtr channel)
++        {
++            UseResolvedHandle<Mixer>(mixer,
++                mix => UseResolvedHandle<Sample>(channel, mix.RemoveChannel));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslMixerSetVolume")]
++        public static void mslMixerSetVolume(IntPtr mixer, double volume)
++        {
++            UseResolvedHandle<Mixer>(mixer, mix => mix.Volume = volume);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslApplyBiquadFilter")]
++        public static IntPtr mslApplyBiquadFilter(IntPtr mixer, IntPtr param, int priority)
++        {
++            using var pa = new ObjectHandle<BiQuadParameter>(param, true);
++            if (pa.GetTarget(out BiQuadParameter target))
++            {
++                return UseResolvedHandle<Mixer, int>(mixer, 0, m => m.AddEffect(priority, target.type, target.fGain, target.freq, target.fCenter, target.fQ));
++            }
++
++            return IntPtr.Zero;
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslUpdateBiquadFilter")]
++        public static void mslUpdateBiquadFilter(IntPtr mixer, IntPtr param, IntPtr entry)
++        {
++            using var pa = new ObjectHandle<BiQuadParameter>(param, true);
++            if (pa.GetTarget(out BiQuadParameter target))
++            {
++                UseResolvedHandle<Mixer>(mixer, m => m.UpdateEffect((int)entry, target.type, target.fGain, target.freq, target.fCenter, target.fQ));
++            }
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslRemoveBiquadFilter")]
++        public static void mslRemoveBiquadFilter(IntPtr mixer, IntPtr entry)
++        {
++            UseResolvedHandle<Mixer>(mixer, m => m.RemoveEffect((int)entry));
++        }
++
++        // BIQUAD
++
++        public enum BiQuadType
++        {
++            LPF = 0, /* low pass filter */
++            HPF = 1, /* High pass filter */
++            BPF = 2, /* band pass filter */
++            BPQ = 3, /* band pass filter (constant skirt gain) */
++            NOTCH = 4, /* Notch Filter */
++            PEQ = 5, /* Peaking band EQ filter */
++            LSH = 6, /* Low shelf filter */
++            HSH = 7, /* High shelf filter */
++            APF = 8 /* all pass filter */
++        }
++
++        private class BiQuadParameter
++        {
++            public BiQuadType type;
++            public float freq;
++            public float fGain;
++            public float fCenter;
++            public float fQ;
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslBiQuadUpdate")]
++        public static IntPtr mslBiQuadUpdate(BiQuadType type, double dbGain, double freq, double srate, double q)
++        {
++            return AllocHandle(new BiQuadParameter
++            {
++                type = type,
++                freq = (float)srate,
++                fCenter = (float)freq,
++                fGain = (float)dbGain,
++                fQ = (float)q
++            });
++        }
++
++        // TRACK
++
++        [UnmanagedCallersOnly(EntryPoint = "mslCreateTrack")]
++        public static IntPtr mslCreateTrack()
++        {
++            return AllocHandle(new Track());
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslCreateTrackDecoder")]
++        public static IntPtr mslCreateTrackDecoder(IntPtr track, IntPtr opaque, avio_alloc_context_read_packet_func read, avio_alloc_context_seek_func seek)
++        {
++            var decoder = UseResolvedHandle<Track, Decoder?>(track, null, t => t.GetDecoder(opaque, read, seek));
++            return decoder != null ? AllocHandle(decoder) : IntPtr.Zero;
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslCreateTrackDecoderWithPath")]
++        public static IntPtr mslCreateTrackDecoderWithPath(IntPtr track, byte* path)
++        {
++            var decoder = UseResolvedHandle<Track, Decoder?>(track, null, t =>
++            {
++                var str = Marshal.PtrToStringUTF8((IntPtr)path);
++                return str != null ? t.GetDecoderWithPath(str) : null;
++            });
++
++            return decoder != null ? AllocHandle(decoder) : IntPtr.Zero;
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslDestroyTrack")]
++        public static void mslDestroyTrack(IntPtr track)
++        {
++            FreeHandle<Track>(track, true);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackSetFreqTempo")]
++        public static void mslTrackSetFreqTempo(IntPtr track, double freq, double tempo)
++        {
++            UseResolvedHandle<Track>(track, t => t.Player.SetFreqTempo(freq, tempo));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackIsLoaded")]
++        public static SDLBool mslTrackIsLoaded(IntPtr track)
++        {
++            return UseResolvedHandle<Track, SDLBool>(track, false, t => t.Player.IsLoaded);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackIsDone")]
++        public static SDLBool mslTrackIsDone(IntPtr track)
++        {
++            return UseResolvedHandle<Track, SDLBool>(track, false, t => t.Player.Done);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackPlay")]
++        public static void mslTrackPlay(IntPtr track)
++        {
++            UseResolvedHandle<Track>(track, t => t.Playing = true);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackPause")]
++        public static void mslTrackPause(IntPtr track)
++        {
++            UseResolvedHandle<Track>(track, t => t.Playing = false);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackIsPlaying")]
++        public static SDLBool mslTrackIsPlaying(IntPtr track)
++        {
++            return UseResolvedHandle<Track, SDLBool>(track, false, t => t.Playing);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackSetVolume")]
++        public static void mslTrackSetVolume(IntPtr track, double volume, double balance)
++        {
++            UseResolvedHandle<Track>(track, t => (t as IAudioChannel).SetVolume((float)volume, (float)balance));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackGetPosition")]
++        public static double mslTrackGetPosition(IntPtr track)
++        {
++            return UseResolvedHandle<Track, double>(track, 0.0, t => t.Player.GetCurrentTime());
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackSetPosition")]
++        public static double mslTrackSetPosition(IntPtr track, double position)
++        {
++            return UseResolvedHandle<Track, double>(track, 0.0, t => t.Player.Seek(position));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackSetLoop")]
++        public static void mslTrackSetLoop(IntPtr track, byte loop)
++        {
++            UseResolvedHandle<Track>(track, t => t.Player.Looping = loop.ToBool());
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackSetRestartPoint")]
++        public static void mslTrackSetRestartPoint(IntPtr track, double position)
++        {
++            UseResolvedHandle<Track>(track, t => t.Player.LoopPoint = position);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackUpdate")]
++        public static void mslTrackUpdate(IntPtr track)
++        {
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackGetLength")]
++        public static double mslTrackGetLength(IntPtr track)
++        {
++            return UseResolvedHandle<Track, double>(track, 0.0, t => t.Player.AudioLength);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackCalculateLoudness")]
++        public static double mslTrackCalculateLoudness(IntPtr track)
++        {
++            return double.NegativeInfinity;
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslTrackCalculateCurrent")]
++        public static int mslTrackCalculateCurrent(IntPtr track, byte movePos, int points, int nfft, float* fft, float* lrAmps, nuint* pointLen)
++        {
++            return UseResolvedHandle<Track, int>(track, -1000, t =>
++            {
++                var fftSpan = new Span<float>(fft, nfft / 2);
++                var ampSpan = new Span<float>(lrAmps, points * 2);
++                int ret = t.Player.CalculateAmplitude(movePos.ToBool(), fftSpan, ampSpan, out var len);
++
++                if (pointLen != null)
++                    *pointLen = (nuint)len;
++
++                return ret;
++            });
++        }
++
++        // SAMPLEFACTORY
++
++        [UnmanagedCallersOnly(EntryPoint = "mslCreateSampleFactory")]
++        public static IntPtr mslCreateSampleFactory()
++        {
++            return AllocHandle(new SampleFactory());
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslRunSampleFactoryDecoder")]
++        public static void mslRunSampleFactoryDecoder(IntPtr factory, IntPtr opaque, avio_alloc_context_read_packet_func read, avio_alloc_context_seek_func seek)
++        {
++            UseResolvedHandle<SampleFactory>(factory, f => f.RunDecoder(opaque, read, seek));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslRunSampleFactoryDecoderWithPath")]
++        public static void mslRunSampleFactoryDecoderWithPath(IntPtr factory, byte* path)
++        {
++            var str = Marshal.PtrToStringUTF8((IntPtr)path);
++
++            if (str != null)
++                UseResolvedHandle<SampleFactory>(factory, f => f.RunDecoderWithPath(str));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslDestroySampleFactory")]
++        public static void mslDestroySampleFactory(IntPtr factory)
++        {
++            FreeHandle<SampleFactory>(factory);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSampleFactoryGetLength")]
++        public static double mslSampleFactoryGetLength(IntPtr factory)
++        {
++            return UseResolvedHandle<SampleFactory, double>(factory, 0.0, f => f.Length);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSampleFactoryIsLoaded")]
++        public static SDLBool mslSampleFactoryIsLoaded(IntPtr factory)
++        {
++            return UseResolvedHandle<SampleFactory, SDLBool>(factory, false, f => f.GetAudioData().Length > 0);
++        }
++
++        // SAMPLE
++
++        [UnmanagedCallersOnly(EntryPoint = "mslCreateSample")]
++        public static IntPtr mslCreateSample(IntPtr factory)
++        {
++            var ret = UseResolvedHandle<SampleFactory, IntPtr>(factory, IntPtr.Zero, f => AllocHandle(new Sample(f)));
++            if (ret == IntPtr.Zero)
++                return AllocHandle(new Sample(null));
++
++            return ret;
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslDestroySample")]
++        public static void mslDestroySample(IntPtr sample)
++        {
++            FreeHandle<Sample>(sample);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSamplePlay")]
++        public static void mslSamplePlay(IntPtr sample)
++        {
++            UseResolvedHandle<Sample>(sample, s => s.Playing = true);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSamplePause")]
++        public static void mslSamplePause(IntPtr sample)
++        {
++            UseResolvedHandle<Sample>(sample, s => s.Playing = false);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSampleIsPlaying")]
++        public static SDLBool mslSampleIsPlaying(IntPtr sample)
++        {
++            return UseResolvedHandle<Sample, SDLBool>(sample, false, s => s.Playing);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSampleSetVolume")]
++        public static void mslSampleSetVolume(IntPtr sample, double volume, double balance)
++        {
++            UseResolvedHandle<Sample>(sample, s => (s as IAudioChannel).SetVolume((float)volume, (float)balance));
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSampleGetFrequency")]
++        public static double mslSampleGetFrequency(IntPtr sample)
++        {
++            return UseResolvedHandle<Sample, double>(sample, 1.0, s => s.Rate);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSampleSetFrequency")]
++        public static void mslSampleSetFrequency(IntPtr sample, double rfreq)
++        {
++            UseResolvedHandle<Sample>(sample, s => s.Rate = rfreq);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSampleGetLoop")]
++        public static SDLBool mslSampleGetLoop(IntPtr sample)
++        {
++            return UseResolvedHandle<Sample, SDLBool>(sample, false, s => s.Looping);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSampleSetLoop")]
++        public static void mslSampleSetLoop(IntPtr sample, byte loop)
++        {
++            UseResolvedHandle<Sample>(sample, s => s.Looping = loop.ToBool());
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslSampleIsDone")]
++        public static SDLBool mslSampleIsDone(IntPtr sample)
++        {
++            return UseResolvedHandle<Sample, SDLBool>(sample, true, s => s.Player.Done);
++        }
++
++        // DECODER
++
++        [UnmanagedCallersOnly(EntryPoint = "mslCreateAudioDecoder")]
++        public static IntPtr mslCreateAudioDecoder(IntPtr opaque, avio_alloc_context_read_packet_func read, avio_alloc_context_seek_func seek,
++            SDL_AudioSpec spec, byte isTrack, IntPtr userdata, DataCallbackFunc callback)
++        {
++            Decoder.DataCallback cb = (data, done) =>
++            {
++                fixed (byte* ptr = data)
++                    callback.FuncPtr(userdata, (IntPtr)ptr, data.Length, done.ToIntBool());
++            };
++
++            var decoder = Decoder.CreateDecoder(opaque, read, seek, cb, spec, isTrack.ToBool());
++            return AllocHandle(decoder);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslCreateAudioDecoderWithPath")]
++        public static IntPtr mslCreateAudioDecoderWithPath(byte* path,
++            SDL_AudioSpec spec, byte isTrack, IntPtr userdata, DataCallbackFunc callback)
++        {
++            var str = Marshal.PtrToStringUTF8((IntPtr)path);
++            if (str == null)
++                return IntPtr.Zero;
++
++            Decoder.DataCallback cb = (data, done) =>
++            {
++                fixed (byte* ptr = data)
++                    callback.FuncPtr(userdata, (IntPtr)ptr, data.Length, done.ToIntBool());
++            };
++
++            var decoder = Decoder.CreateDecoderWithPath(str, cb, spec, isTrack.ToBool());
++            return AllocHandle(decoder);
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslDestroyAudioDecoder")]
++        public static void mslDestroyAudioDecoder(IntPtr* decoderptr)
++        {
++            if (decoderptr == null)
++                return;
++
++            IntPtr decoder = *decoderptr;
++
++            if (decoder == IntPtr.Zero)
++                return;
++
++            using var handle = new ObjectHandle<Decoder>(decoder, true);
++            if (handle.GetTarget(out var d))
++                d.Dispose();
++
++            *decoderptr = IntPtr.Zero;
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslDecoderGetMetadata")]
++        public static void mslDecoderGetMetadata(IntPtr decoder, int* bitrate, double* length, nuint* bytelen)
++        {
++            UseResolvedHandle<Decoder>(decoder, d =>
++            {
++                d.GetMetadata(out var br, out var len, out var blen);
++
++                if (bitrate != null)
++                    *bitrate = br;
++
++                if (length != null)
++                    *length = len;
++
++                if (bytelen != null)
++                    *bytelen = (nuint)blen;
++            });
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslDecoderProcessChunk")]
++        public static int mslDecoderProcessChunk(IntPtr decoder)
++        {
++            return UseResolvedHandle<Decoder, int>(decoder, 0, d => d.ProcessChunk());
++        }
++
++        [UnmanagedCallersOnly(EntryPoint = "mslDecoderIsDone")]
++        public static SDLBool mslDecoderIsDone(IntPtr decoder)
++        {
++            return UseResolvedHandle<Decoder, SDLBool>(decoder, true, d => d.Done);
++        }
++    }
++}
+diff --git a/library/TrackSDL3AudioPlayer.cs b/library/TrackSDL3AudioPlayer.cs
+index e45a393..9b9d5a0 100644
+--- a/library/TrackSDL3AudioPlayer.cs
++++ b/library/TrackSDL3AudioPlayer.cs
+@@ -1,5 +1,6 @@
+ /* SPDX-License-Identifier: LGPL-2.1-only */
+ 
++using System.Runtime.InteropServices;
+ using NAudio.Dsp;
+ using Complex = NAudio.Dsp.Complex;
+ 
+@@ -33,7 +34,14 @@ namespace native_audio_library
+         /// <summary>
+         /// Stores raw audio data.
+         /// </summary>
++#if HBXL_IN_PROCESS
++        // HBXL: whole decoded tracks live in the console's small managed heap: 16-bit PCM in 64 KiB segments (see SegmentedPcm).
++        protected SegmentedPcm? AudioData;
++
++        private const float s16_to_float = 1f / 32768f;
++#else
+         protected float[]? AudioData;
++#endif
+ 
+         protected long AudioDataPosition;
+ 
+@@ -73,6 +81,13 @@ namespace native_audio_library
+             if (wanted <= AudioData?.LongLength)
+                 return;
+ 
++#if HBXL_IN_PROCESS
++            lock (SyncLock)
++            {
++                AudioData ??= new SegmentedPcm();
++                AudioData.EnsureCapacity(wanted);
++            }
++#else
+             float[] temp = new float[wanted];
+ 
+             if (AudioData != null)
+@@ -82,6 +97,7 @@ namespace native_audio_library
+             {
+                 AudioData = temp;
+             }
++#endif
+         }
+ 
+         internal void PrepareStream(long byteLength = 3 * 60 * 44100 * 2 * 4)
+@@ -106,6 +122,15 @@ namespace native_audio_library
+             int floatLen = next.Length / sizeof(float);
+             long currentLen = AudioRawLength;
+ 
++#if HBXL_IN_PROCESS
++            // Segments grow without copying (upstream re-allocated and copied the whole song for every frame decoded past FFmpeg's
++            // duration estimate, which is often short for MP3s).
++            if (currentLen + floatLen > AudioData.LongLength)
++                prepareArray(currentLen + floatLen);
++
++            AudioData.Write(currentLen, MemoryMarshal.Cast<byte, float>(next.Slice(0, floatLen * sizeof(float))));
++            currentLen += floatLen;
++#else
+             if (currentLen + floatLen > AudioData.LongLength)
+                 prepareArray(currentLen + floatLen);
+ 
+@@ -114,6 +139,7 @@ namespace native_audio_library
+                 float src = BitConverter.ToSingle(next.Slice(i * sizeof(float), sizeof(float)));
+                 AudioData[currentLen++] = src;
+             }
++#endif
+ 
+             AudioRawLength = currentLen;
+         }
+@@ -186,8 +212,13 @@ namespace native_audio_library
+                             }
+ 
+                             // swap stereo channel
++#if HBXL_IN_PROCESS
++                            data[read + 1 + offset] = AudioData[AudioDataPosition--] * s16_to_float;
++                            data[read + offset] = AudioData[AudioDataPosition--] * s16_to_float;
++#else
+                             data[read + 1 + offset] = AudioData[AudioDataPosition--];
+                             data[read + offset] = AudioData[AudioDataPosition--];
++#endif
+                         }
+                     }
+                     else if (AudioDataPosition < 0)
+@@ -219,7 +250,11 @@ namespace native_audio_library
+                         long remain = dataLength - AudioDataPosition;
+                         int wrote = (int)Math.Min(needed, remain);
+ 
++#if HBXL_IN_PROCESS
++                        AudioData.CopyOut(AudioDataPosition, data, offset, wrote);
++#else
+                         Array.Copy(AudioData, AudioDataPosition, data, offset, wrote);
++#endif
+                         AudioDataPosition += wrote;
+                         read += wrote;
+                     }
+@@ -274,7 +309,11 @@ namespace native_audio_library
+ 
+             long final = Math.Min(data.Length, remain);
+ 
++#if HBXL_IN_PROCESS
++            AudioData.CopyOut(start, data, 0, (int)final);
++#else
+             Array.Copy(AudioData, start, data, 0, final);
++#endif
+             return final;
+         }
+ 
+diff --git a/hbxl/mysoundlib-hbxl.csproj b/hbxl/mysoundlib-hbxl.csproj
+new file mode 100644
+index 0000000..4b9a449
+--- /dev/null
++++ b/hbxl/mysoundlib-hbxl.csproj
+@@ -0,0 +1,31 @@
++<Project Sdk="Microsoft.NET.Sdk">
++  <!-- HBLauncher (Switch 2) build of mysoundlib: bindings (mysoundlib_cs) and library (native_audio_library) in one
++       managed assembly, compiled into the app by NativeAOT instead of being loaded as libmysoundlib.so.
++       The bindings' DllImport("mysoundlib") calls resolve to the library's [UnmanagedCallersOnly(EntryPoint = "msl...")]
++       exports through DirectPInvoke + UnmanagedEntryPointsAssembly in the app project.
++       BASS decoding and ASIO output are left out (HBXL_NO_BASS): FFmpeg decodes, SDL3 plays.
++       HBXL_IN_PROCESS drops the bindings' [SuppressGCTransition]: the callee is managed code in the same runtime, and
++       entering it without the transition is a fail-fast ("attempted to call a UnmanagedCallersOnly method"). -->
++  <PropertyGroup>
++    <TargetFramework>net10.0</TargetFramework>
++    <AssemblyName>mysoundlib-hbxl</AssemblyName>
++    <RootNamespace>native_audio_library</RootNamespace>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <Nullable>enable</Nullable>
++    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
++    <IsAotCompatible>true</IsAotCompatible>
++    <DefineConstants>$(DefineConstants);HBXL_NO_BASS;HBXL_IN_PROCESS</DefineConstants>
++    <NoWarn>$(NoWarn);CS1591</NoWarn>
++  </PropertyGroup>
++  <ItemGroup>
++    <Compile Include="../bindings/*.cs" />
++    <Compile Include="../library/*.cs" Exclude="../library/BassDecoder.cs;../library/NAudioAsioManager.cs" />
++  </ItemGroup>
++  <ItemGroup>
++    <PackageReference Include="NAudio.Core" Version="2.2.1" />
++    <!-- Same version as osu.Framework's. -->
++    <PackageReference Include="ppy.SDL3-CS" Version="2026.1002.1" />
++    <PackageReference Include="SoundTouch.Net" Version="2.3.2" />
++    <PackageReference Include="FFmpeg.AutoGen" Version="7.1.1" />
++  </ItemGroup>
++</Project>
+diff --git a/library/SegmentedPcm.cs b/library/SegmentedPcm.cs
+new file mode 100644
+index 0000000..6d812d9
+--- /dev/null
++++ b/library/SegmentedPcm.cs
+@@ -0,0 +1,73 @@
++/* SPDX-License-Identifier: LGPL-2.1-only */
++
++#if HBXL_IN_PROCESS
++namespace native_audio_library
++{
++    /// <summary>
++    /// HBLauncher (Switch 2): a decoded track as 16-bit PCM in 64 KiB segments.
++    /// The console's managed heap is small (768 MiB hard limit, 1 GiB region range), and whole songs live in it. One array per
++    /// song (40-85 MB) lands on the large object heap, which needs contiguous space: after a few map changes the range was so
++    /// fragmented that even a 4 MiB array couldn't be placed (OutOfMemoryException with ~270 MiB in use). Segments stay below
++    /// the LOH threshold, are compacted like any other object, and growing never copies.
++    /// </summary>
++    internal sealed class SegmentedPcm
++    {
++        private const int segment_bits = 15;
++        private const int segment_length = 1 << segment_bits; // 32768 samples = 64 KiB
++        private const int segment_mask = segment_length - 1;
++        private const float s16_to_float = 1f / 32768f;
++
++        private readonly List<short[]> segments = new List<short[]>();
++
++        /// <summary>Capacity in samples.</summary>
++        public long LongLength => (long)segments.Count << segment_bits;
++
++        public void EnsureCapacity(long samples)
++        {
++            while (LongLength < samples)
++                segments.Add(new short[segment_length]);
++        }
++
++        public short this[long index]
++        {
++            get => segments[(int)(index >> segment_bits)][index & segment_mask];
++            set => segments[(int)(index >> segment_bits)][index & segment_mask] = value;
++        }
++
++        /// <summary>Converts float samples to 16-bit and stores them at <paramref name="index"/> (capacity must be ensured).</summary>
++        public void Write(long index, ReadOnlySpan<float> src)
++        {
++            while (src.Length > 0)
++            {
++                short[] seg = segments[(int)(index >> segment_bits)];
++                int at = (int)(index & segment_mask);
++                int n = Math.Min(src.Length, segment_length - at);
++
++                for (int i = 0; i < n; i++)
++                    seg[at + i] = (short)Math.Clamp(MathF.Round(src[i] * 32768f), -32768f, 32767f);
++
++                src = src.Slice(n);
++                index += n;
++            }
++        }
++
++        /// <summary>Copies <paramref name="count"/> samples starting at <paramref name="index"/> into <paramref name="dst"/> as floats.</summary>
++        public void CopyOut(long index, float[] dst, int dstIndex, int count)
++        {
++            while (count > 0)
++            {
++                short[] seg = segments[(int)(index >> segment_bits)];
++                int at = (int)(index & segment_mask);
++                int n = Math.Min(count, segment_length - at);
++
++                for (int i = 0; i < n; i++)
++                    dst[dstIndex + i] = seg[at + i] * s16_to_float;
++
++                index += n;
++                dstIndex += n;
++                count -= n;
++            }
++        }
++    }
++}
++#endif

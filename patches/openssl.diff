@@ -1,0 +1,19 @@
+diff --git a/crypto/armcap.c b/crypto/armcap.c
+index 3005d29..b0b5db2 100644
+--- a/crypto/armcap.c
++++ b/crypto/armcap.c
+@@ -77,6 +77,14 @@ void OPENSSL_cpuid_setup(void) __attribute__((constructor));
+ #include <sys/auxv.h>
+ #define OSSL_IMPLEMENT_GETAUXVAL
+ #endif
++#elif defined(__linux__)
++/*
++ * musl (HBLauncher Switch 2 port): getauxval() exists, and the SIGILL fallback below
++ * can't work there (hbxl has no signals: the first unsupported probe kills the app).
++ * hbxl passes no AT_HWCAP, so this yields 0 and OpenSSL uses its portable code.
++ */
++#include <sys/auxv.h>
++#define OSSL_IMPLEMENT_GETAUXVAL
+ #endif
+ #if defined(__FreeBSD__) || defined(__OpenBSD__)
+ #include <sys/param.h>

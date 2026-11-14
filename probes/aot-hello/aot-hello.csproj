@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- NativeAOT go/no-go probe for HBLauncher's Linux personality (hbxl).
+       Build with ./build.sh: ILC emits an object; hbxl-build links it. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishAot>true</PublishAot>
+    <RuntimeIdentifier>linux-musl-arm64</RuntimeIdentifier>
+    <StaticExecutable>true</StaticExecutable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <StripSymbols>false</StripSymbols>
+    <!-- hbxl has no background-GC-friendly signals; keep the GC simple. -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <ServerGarbageCollector>false</ServerGarbageCollector>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- hbxl mmap commits memory immediately, so cap what the GC reserves. -->
+    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="134217728" />
+    <RuntimeHostConfigurationOption Include="System.GC.RegionRange" Value="268435456" />
+    <!-- Resolve libc P/Invokes at link time (no dlopen on the console). -->
+    <DirectPInvoke Include="libc" />
+  </ItemGroup>
+</Project>
