@@ -19,13 +19,15 @@ default**; nxlink is only a development log channel. Never design features aroun
 
 - **Plan approved: the "musl island"** (reasoning in FEASIBILITY.md, 2026-11-13). Everything osu! needs stays musl-built
   as on hbxl: the ILC object, NativeAOT libs, SDL3/FFmpeg/OpenSSL/Realm/veldrid-spirv/mysoundlib, the C shims and musl
-  libc.a. It is linked `ld -r` into one `island.o`, and every symbol is hidden except an export list. Its only imports are
-  `__lx_syscall` (patched musl syscall hook), `vkGetInstanceProcAddr` (OunceVK, via the island's fake dlopen) and a few
-  host calls. A libounce `.nro` (`console/lx/`, to be written) implements the Linux syscalls on libnx. This is a port of
+  libc.a. It is linked `ld -r` into one `island.o`, and every symbol is hidden except an export list. It has **no
+  imports at all**: its one export is `lx_island_main(host, stack, size)`, and it reaches the host only through the
+  function-pointer table `struct lx_host` (`lx/include/lx_abi.h`): syscalls (musl's `__hbx_syscall` hook), clone, log;
+  later Vulkan's `vkGetInstanceProcAddr` and host services (input, audio). A libounce `.nro` (`lx/host`) implements the Linux syscalls on libnx. This is a port of
   hbxl's runtime.c/memory.c/thread.c/vfs.c/net.c, minus the file server.
   - Phase 0: devkit + vulkan-clear over nxlink; read libounce for: ~~TLS register~~ (**done: `tpidr_el0` is unused by
     the whole devkit**, which uses `tpidrro_el0`+0x1F8 via `-mtp=soft`), exception resume (**no: CPU exceptions never reach the app on
-    20261114c either**, Test 0b; faults stay fatal as on hbxl, Phase 5 parked; see FEASIBILITY.md), heap size, JIT mapping
+    20261114c either**, Test 0b; faults stay fatal as on hbxl, Phase 5 parked; see FEASIBILITY.md), ~~heap size~~ (9152 MiB,
+    apparently committed on touch), JIT mapping
     addresses, threads left running at exit.
   - **Phase 1 DONE 2026-11-13** (Test 1, 2022/2022 checks on hardware): `lx/island` (musl side), `lx/host` (libounce
     .nro: syscalls, mmap, clone/futex), `tools/make-island.sh`, `probes/hello-island`. Process memory: 9152 MiB total.
