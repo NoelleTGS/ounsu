@@ -4,24 +4,24 @@ Upstream: [openssl/openssl](https://github.com/openssl/openssl) `openssl-3.5.9` 
 
 .NET's cryptography and TLS (`System.Security.Cryptography.Native.OpenSsl`) load `libssl.so.3` with dlopen. The console
 has no dynamic loading, so OpenSSL is built as static `libssl.a` + `libcrypto.a`, and a generated symbol table
-(`probes/gfx-probe/tools/gen-ssl-syms.py` → `obj/ssl_syms.c`) answers .NET's `dlopen`/`dlsym` calls from the fake libdl in
-the app's shims. It's what osu! uses for HTTPS, and for hashing.
+(`tools/gen-ssl-syms.py` → `obj/ssl_syms.c`) answers .NET's `dlopen`/`dlsym` calls from the island's fake libdl. It's what osu! uses for HTTPS, and for hashing.
 
 ## Change
 
 | File | Change |
 |---|---|
-| `crypto/armcap.c` | Use `getauxval()` on musl Linux for CPU feature detection. Without it OpenSSL probes instructions and catches SIGILL; hbxl has no signals, so the first unsupported probe would kill the app. hbxl passes no `AT_HWCAP`, so OpenSSL uses its portable code |
+| `crypto/armcap.c` | Use `getauxval()` on musl Linux for CPU feature detection. Without it OpenSSL probes instructions and catches SIGILL; the console has no signals, so the first unsupported probe would kill the app. The island passes an `AT_HWCAP` with the console CPU's features (`lx/island/lx_island.c`), so OpenSSL uses its ARMv8 crypto code |
 
 ## Notes
 
 - `OPENSSLDIR` is `/usr/local/ssl`, so OpenSSL looks for CA certificates at `/usr/local/ssl/cert.pem`. On the console that
-  path is on the file server: `tools/install-ca-bundle.sh` copies the PC's bundle to `fsroot/usr/local/ssl/cert.pem`.
-- Random numbers come from hbxl's `getrandom`, which now uses the console's CSPRNG (`HBLauncher.md`, change 17).
+  path is in the `.nro`'s romfs: `console/osu-game/build.sh` copies `fsroot/usr/local/ssl/cert.pem` (a CA bundle from
+  the PC) into it.
+- Random numbers come from the host's `getrandom`, which uses the console's CSPRNG (`randomGet`).
 
 ## Restoring
 
 ```sh
 git -C src/native/openssl checkout -f 45e844fa2a14ec92d146bd8f5778ac130b6625fb
-git -C src/native/openssl apply --whitespace=nowarn ~/osu-HBLauncher/patches/openssl.diff
+git -C src/native/openssl apply --whitespace=nowarn patches/openssl.diff
 ```

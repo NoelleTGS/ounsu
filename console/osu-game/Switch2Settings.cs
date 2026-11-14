@@ -1,14 +1,13 @@
 // osu! on Switch 2 (kaiHEN): the "Switch 2" section of the in-game settings.
 //
-// Gyro aiming and USB keyboard/mouse options live only here (their hbxl-env variables are gone, except the
-// HBXL_NO_KBMOUSE=1 escape hatch). The audio output queue and two diagnostics are here too but keep their hbxl-env
-// lines, because a bad value can break things before the settings can be reached: the hbxl-env value is the default of
-// the setting, and a value changed in the game is saved and wins from then on (the revert button goes back to the
-// hbxl-env value). Everything is stored in switch2.ini next to osu!'s own config, changed values only. Startup-only
-// options (HBXL_VK_*, ...) stay in hbxl-env. (hbxl-env is the HBLauncher-era name; its kaiHEN replacement, a startup
-// config file on the SD card, comes with the host .nro.)
+// Display, gyro aiming, Joy-Con mouse and USB keyboard/mouse options live only here (LX_NO_KBMOUSE=1 in lx-env is the
+// one escape hatch). The audio output queue and the diagnostics are here too but keep their lx-env lines, because a bad
+// value can break things before the settings can be reached: the lx-env value is the default of the setting, and a
+// value changed in the game is saved and wins from then on (the revert button goes back to the lx-env value).
+// Everything is stored in switch2.ini next to osu!'s own config, changed values only. Startup-only options stay in
+// lx-env (/switch/osu/lx-env on the SD card, then the .nro's built-in defaults).
 //
-// The values reach the C shims through small setters (shim/hbxl_input.c, hbxl_audio_out.c, hbxl_gc_timing.c). On the
+// The values reach the C shims through small setters (shim/lx_input.c, lx_audio_out.c, lx_gc.c, lx_osu.c). On the
 // desktop comparison build the setters do nothing, so the section can be looked at there.
 
 using System;
@@ -49,7 +48,7 @@ public enum Switch2Setting
 
 public partial class Switch2Config : IniConfigManager<Switch2Setting>
 {
-    /// <summary>Gyro buttons in the order of hbxl_input_set_gyro's index (shim/hbxl_input.c).</summary>
+    /// <summary>Gyro buttons in the order of hbxl_input_set_gyro's index (shim/lx_input.c).</summary>
     public static readonly string[] GYRO_BUTTONS = { "Off", "B", "L", "R", "ZL", "ZR", "L3", "R3" };
 
     /// <summary>Joy-Con mouse choices; the index is hbxl_input_set_joymouse's side mask (bit 0 left, bit 1 right).</summary>
@@ -95,7 +94,7 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
         SetDefault(Switch2Setting.GyroInvertX, false);
         SetDefault(Switch2Setting.GyroInvertY, false);
 
-        // HBXL_NO_KBMOUSE=1 in hbxl-env still forces both off in the shim (escape hatch), whatever this says.
+        // LX_NO_KBMOUSE=1 in lx-env still forces both off in the shim (escape hatch), whatever this says.
         SetDefault(Switch2Setting.UsbKeyboardMouse, true);
         SetDefault(Switch2Setting.MouseSpeed, 1f, 0.1f, 10f, 0.1f);
 
@@ -110,7 +109,7 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
         SetDefault(Switch2Setting.DockedResolution, DOCKED_RESOLUTION[0]);
         SetDefault(Switch2Setting.FrameRate, FRAME_RATE[0]);
 
-        // The audio queue and the diagnostics keep their hbxl-env lines, which are the defaults here.
+        // The audio queue and the diagnostics keep their lx-env lines, which are the defaults here.
         SetDefault(Switch2Setting.AudioPeriod, envInt("HBXL_AUDIO_PERIOD", 128, 16, 1024), 16, 1024);
         SetDefault(Switch2Setting.AudioBuffers, envInt("HBXL_AUDIO_BUFFERS", 2, 1, 16), 1, 16);
 
@@ -121,7 +120,7 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
     }
 
     /// <summary>
-    /// Only settings that differ from their default are written, so an untouched setting keeps following hbxl-env.
+    /// Only settings that differ from their default are written, so an untouched setting keeps following lx-env.
     /// </summary>
     protected override bool PerformSave()
     {

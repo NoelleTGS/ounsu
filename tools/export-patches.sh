@@ -3,8 +3,8 @@
 # so this repository can restore a working state without vendoring gigabytes of sources.
 #   patches/<name>.base   commit the patch applies to (git describe + full hash)
 #   patches/<name>.diff   tracked changes (incl. submodules) + new source files, vs that commit
-# Re-run before committing whenever src/*, ~/HBLauncher or ~/ns2jb changed.
-# Restore: git -C <checkout> checkout <base hash> && git -C <checkout> apply --index? (see README.md)
+# Re-run before committing whenever a checkout under src/ changed.
+# Restore: see the "Restoring" section of each patches/<name>.md.
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT="$ROOT/patches"
@@ -18,9 +18,7 @@ realm-dotnet $ROOT/src/native/realm-dotnet
 veldrid-spirv $ROOT/src/native/veldrid-spirv
 openssl $ROOT/src/native/openssl
 mysoundlib $ROOT/src/mysoundlib
-ffmpeg $ROOT/src/native/ffmpeg
-HBLauncher $HOME/HBLauncher
-ns2jb $HOME/ns2jb"
+ffmpeg $ROOT/src/native/ffmpeg"
 
 # New files worth keeping: sources and small configs, never build output or logs.
 keep() {

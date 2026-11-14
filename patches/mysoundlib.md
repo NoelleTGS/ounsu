@@ -23,5 +23,5 @@ The Mixer fix is a plain upstream bug; worth reporting to mysoundlib.
 
 ```sh
 git -C src/mysoundlib checkout -f 4359b0e05e19cd81729dde384dbb063186f2d10d
-git -C src/mysoundlib apply --whitespace=nowarn ~/osu-HBLauncher/patches/mysoundlib.diff
+git -C src/mysoundlib apply --whitespace=nowarn patches/mysoundlib.diff
 ```

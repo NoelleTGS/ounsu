@@ -36,7 +36,7 @@ def make_certs(host):
     stamp = CERTS / "host.txt"
     if not ca_pem.exists():
         subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", ca_key, "-out", ca_pem,
-                        "-days", "3650", "-subj", "/CN=osu-HBLauncher net-probe test CA",
+                        "-days", "3650", "-subj", "/CN=osu-kaihen net-probe test CA",
                         "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign"],
                        check=True, capture_output=True)
     if not pem.exists() or not stamp.exists() or stamp.read_text() != host:

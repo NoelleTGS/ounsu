@@ -15,26 +15,31 @@ On top of it: FFmpeg.AutoGen 7.1.1 (matches the static FFmpeg 7.1.1), and the `H
 
 ## 2. `#if HBXL` (console build)
 
+The `#if HBXL` name comes from the HBLauncher version of this port (hbxl was its Linux runtime); on kaiHEN the same code
+runs on the island (see the README, "How it works"). The native entry points it binds are implemented in
+`console/osu-game/shim/lx_osu.c`.
+
 | File | Change |
 |---|---|
-| `Platform/SDL3/SDL3Window.cs` | SDL runs on its offscreen video driver; the real display is HBLauncher's vi window, handed to Vulkan as a fake "Wayland surface" (the shim in `console/osu-game/shim/hbxl_vk_shim.c` maps it onto `VK_NN_vi_surface`) |
-| `Platform/SDL3/SDL3Window.Windowing.cs` | Window pinned to 1920x1080 and windowed mode only (the console only shows the first swapchain, and only at 1920x1080) |
+| `Platform/SDL3/SDL3Window.cs` | SDL runs on its offscreen video driver. The real display is the console's window (the host's vi window), handed to Vulkan as a fake "Wayland surface": `lx/dotnet/lx_vk.c` turns that into a `VK_NN_vi_surface` on OunceVK. `followHbxlDisplay` runs once per frame |
+| `Platform/SDL3/SDL3Window.Windowing.cs` | Windowed mode only (the window already covers the screen). The windowed size is pinned to the console window's size and follows it every frame (`HbxlNative.Display()`): docking, undocking and the "Switch 2" Display settings resize the SDL window and with it the swapchain. The display mode's refresh rate is the host's frame rate (60 or 120 Hz), so the frame limiters follow it |
+| `Platform/HbxlNative.cs` (new) | Bindings to the console's window: `ViWindow()` and `Display()` (size, frame rate, change serial; the call also lets the host handle the console's applet messages) |
 | `Platform/GameHost.cs` | Vulkan only, no OpenGL |
-| `Platform/HbxlNative.cs` (new) | Bindings to the hbxl runtime's exports |
 | `Platform/Linux/Native/Library.cs`, `Threading/AudioThread.cs` | No dlopen search paths: everything is linked statically |
-| `Timing/ThrottledFrameClock.cs` | A thread that skips its frame sleep still passes a GC safepoint (no signals on hbxl, so the GC can't interrupt a busy thread; this was a hardware hang) |
+| `Timing/ThrottledFrameClock.cs` | A thread that skips its frame sleep still passes a GC safepoint (the runtime has no signals to interrupt a busy thread for the GC; on HBLauncher this was a hardware hang) |
 | `Graphics/Veldrid/Vertices/VeldridVertexUtils.cs` | Vertex attributes in byte-offset order (NativeAOT's field order can differ) |
 | `Graphics/Rendering/Renderer.cs` | Skips a layout self-check that needs marshalling metadata NativeAOT lacks |
 | `Graphics/Shaders/ShaderCompilationStore.cs` | Rejects shader-cache entries written by broken builds (they crashed the GPU driver) |
-| `Bindables/Bindable.cs`, `Bindables/INotifyValueChangedUntyped.cs` | Non-generic value subscription (no `MakeGenericMethod` over value types) |
-| `Audio/Track/TrackSDL3.cs`, `Audio/SDL3AudioManager.cs`, `Configuration/FrameworkConfigManager.cs` | Track reads from the file server don't stall the audio thread; mysoundlib is compiled in; SDL3 is the only audio driver |
+| `Bindables/Bindable.cs`, `Bindables/INotifyValueChangedUntyped.cs`, `Configuration/InputConfigManager.cs` | Non-generic value subscription (no `MakeGenericMethod` over value types) |
+| `Audio/Track/TrackSDL3.cs`, `Audio/SDL3AudioManager.cs`, `Configuration/FrameworkConfigManager.cs` | A track's first read and decode run on the decoder thread, not the audio thread (written for HBLauncher's file server, harmless on the SD card); mysoundlib is compiled in; SDL3 is the only audio driver |
 | `Audio/Track/TrackBass.cs` | Copes with the BASS stubs (every call returns 0) |
-| `IO/Network/WebRequest.cs` | At most 8 connections per server: HTTP/1.1 uses one socket per request, and SmileBASIC's socket service is shared with the file server. Also gentler on ppy's servers |
+| `Graphics/Video/FFmpegExtensions.cs`, `Graphics/Video/VideoDecoder.cs` | Builds against FFmpeg.AutoGen 7 (`HBXL_AUDIO`): removed pixel formats, and no custom library loader (FFmpeg comes from the static libraries through the island's fake libdl) |
+| `IO/Network/WebRequest.cs` | At most 8 connections per server. HTTP/1.1 uses one socket per request; on HBLauncher the socket pool was small and shared with the file server. Kept: it is also gentler on ppy's servers |
 | `osu.Framework.csproj` | HBXL/HbxlAudio build properties |
 
 ## Restoring
 
 ```sh
 git -C src/osu-framework checkout -f f05a31a9d82972e9b752060370ec17df17bdabda
-git -C src/osu-framework apply --whitespace=nowarn ~/osu-HBLauncher/patches/osu-framework.diff
+git -C src/osu-framework apply --whitespace=nowarn patches/osu-framework.diff
 ```

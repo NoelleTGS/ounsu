@@ -291,7 +291,7 @@ static partial class Program
             {
                 foreach (var s in open) s.Dispose();
             }
-            // the file server must still answer after the pool was exhausted
+            // the SD card must still work after the socket pool was exhausted
             File.WriteAllText(root + "/tmp/net-probe-pool.txt", $"{open.Count}\n");
             File.Delete(root + "/tmp/net-probe-pool.txt");
             if (open.Count < 8) throw new Exception($"only {open.Count} sockets (limit: {stop}); osu-framework uses up to 8 per host");
@@ -309,7 +309,7 @@ static partial class Program
             {
                 using var handler = new SocketsHttpHandler();
                 using var c = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-                c.DefaultRequestHeaders.UserAgent.ParseAdd("osu-HBLauncher-net-probe/1.0");
+                c.DefaultRequestHeaders.UserAgent.ParseAdd("osu-kaihen-net-probe/1.0");
                 using var r = await c.GetAsync("https://osu.ppy.sh/api/v2/seasonal-backgrounds");
                 string body = await r.Content.ReadAsStringAsync();
                 var skew = r.Headers.Date.HasValue ? (DateTimeOffset.UtcNow - r.Headers.Date.Value).TotalSeconds : double.NaN;

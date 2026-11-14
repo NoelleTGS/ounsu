@@ -73,8 +73,8 @@ default**; nxlink is only a development log channel. Never design features aroun
 - HBLauncher-only material was left out of this repo on 2026-11-13: bti-probe, vfs-hosttest, the net host tests, the
   HBLauncher/ns2jb patches, the file-server/UDP/unplug tools, hbxl-env, hbxl_sb_input.c, symbolize.py, the generated
   hbxl-build manifests (they had absolute home paths; `~/osu-HBLauncher` has them), and the PC-link code in
-  Program.cs/Switch2Settings.cs. `make-manifest.py` and `make-base.py` stay until Phase 1's island link replaces them
-  (make-base.py lists every static library osu! links).
+  Program.cs/Switch2Settings.cs. `make-manifest.py` and `make-base.py` were dropped once the island link replaced
+  them. The leftover HBLauncher thread-dump/stall-beat diagnostics went on 2026-11-14.
 - **Devkit installed** 2026-11-13: ounce-devkit 20261114 (libounce 9382b1e, OunceVK f5afcd2, kaiHEN eb81e19) in
   `/opt/devkitpro`. Arch's pacman needs both `[dkp-libs]` and `[dkp-linux]` repos.
 - **Joy-Con 2 mouse mode works** (2026-11-14, run 10): libounce's `PadPointer` (Nmouse, `switch2/services/nmouse.h`).
@@ -168,8 +168,8 @@ are tracked.
 
 | Path | What |
 |---|---|
-| `console/osu-game` | The osu! app: `Program.cs`, `ConsoleOsuGame`, `Switch2Settings.cs`, `HubSelfTest.cs`, `rd.xml`, `build.sh` and `shim/` (hbxl C shims: input, audio out, net, vk, thunks, thread stacks). Still the HBLauncher build; PC-link code removed. |
-| `probes/` | Probe sources (aot-hello, gfx, net, hub), still built for hbxl. aot-hello's `tools/` (capture-link.sh, make-manifest.py) and gfx-probe's shims are what osu-game's build uses. |
+| `console/osu-game` | The osu! app: `Program.cs`, `ConsoleOsuGame`, `Switch2Settings.cs`, `GameplayGcSession.cs`, `HubSelfTest.cs`, `rd.xml`, `build.sh` and `shim/` (island-side C: `lx_input.c`, `lx_audio_out.c`, `lx_gc.c`, `lx_osu.c` (the `hbx*` symbols osu-framework and the reused SDL3 still look for), BASS stubs). |
+| `probes/` | One bring-up probe per step, each a kaiHEN .nro: hello-island, aot-hello, vk-island, gfx-probe, net-probe (hub-probe runs on the PC). aot-hello's `tools/capture-link.sh` is what osu-game's build uses to capture the link line. |
 | `src/osu-framework`, `src/osu`, `src/mysoundlib` | Patched checkouts, copied **with their uncommitted changes** (git working trees; `patches/*.diff` snapshot them via `tools/export-patches.sh`). Build outputs (bin/obj) weren't copied. |
 | `src/native/{SDL,ffmpeg,veldrid-spirv,realm-dotnet,openssl,sqlite-dl}`, `src/veldrid-src` | Native sources with the hbxl patches; the `build-hbx/` and `build-desktop/` outputs weren't copied (they still exist in `~/osu-HBLauncher/src/native/*`). Under the musl-island plan they stay **musl builds** (not devkitA64): reuse or rebuild them with the musl toolchain. |
 | `patches/` | Diff + base commit + notes per external checkout (SDL, osu, osu-framework, ffmpeg, openssl, realm-dotnet, mysoundlib, veldrid-spirv). The hbxl runtime diff is `~/osu-HBLauncher/patches/HBLauncher.diff` (applied in `~/HBLauncher`). |

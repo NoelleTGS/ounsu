@@ -11,67 +11,14 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
 // osu! (lazer) on Switch 2 (kaiHEN homebrew, Linux syscalls emulated by the host .nro): cut-down console entry point.
-// No Velopack/Discord/IPC/tournament (osu.Desktop's extras). Logs go through hbxl_log
-// and osu!'s own logs land on the SD card under the data root's
+// No Velopack/Discord/IPC/tournament (osu.Desktop's extras). Logs go through hbxl_log (the host's log: nxlink, and the
+// SD card with LX_LOG_FILE), and osu!'s own logs land on the SD card under the data root's
 // /home/.local/share/osu/logs, next to periodic screenshots (screenshots-console/, opt-in: HBXL_SCREENSHOT_EVERY=<s>).
 static unsafe partial class Program
 {
 #if HBXL
     [LibraryImport("hbxl", EntryPoint = "hbxl_log", StringMarshalling = StringMarshalling.Utf8)]
     private static partial void hbxl_log(string text);
-
-    [LibraryImport("hbxl", EntryPoint = "hbxl_thread_backtrace")]
-    private static partial int hbxl_thread_backtrace(int tid, ulong* output, int max);
-
-    /// <summary>
-    /// Hang diagnostics: backtrace (pc, lr, frame-pointer chain) of every hbxl thread except the caller.
-    /// Symbolise the addresses with nm on app/build/app.elf.
-    /// </summary>
-    /// <summary>Stall detector heartbeat (shim/hbxl_input.c): 0 window, 1 draw, 2 update.</summary>
-    [LibraryImport("hbxl", EntryPoint = "hbxl_stall_beat")]
-    internal static partial void StallBeat(int which);
-
-    [LibraryImport("hbxl", EntryPoint = "hbxl_gettid")]
-    private static partial long hbxl_gettid();
-
-    [LibraryImport("hbxl", EntryPoint = "hbxl_thread_state")]
-    private static partial int hbxl_thread_state(int tid);
-
-    [LibraryImport("hbxl", EntryPoint = "hbxl_clone_progress")]
-    private static partial void hbxl_clone_progress(int* output);
-
-    [LibraryImport("hbxl", EntryPoint = "hbxl_dbg_tl_lock")]
-    private static partial int hbxl_dbg_tl_lock();
-
-    [LibraryImport("hbxl", EntryPoint = "hbxl_dbg_malloc_lock")]
-    private static partial int hbxl_dbg_malloc_lock();
-
-    internal static void DumpThreads(string reason)
-    {
-        int* clone = stackalloc int[3];
-        hbxl_clone_progress(clone);
-        Log($"threads: dump ({reason}); by tid {hbxl_gettid()}; musl thread-list lock {hbxl_dbg_tl_lock():x} (owner tid, 0 = free), " +
-            $"malloc lock {hbxl_dbg_malloc_lock():x}, " +
-            $"last clone: by tid {clone[0]} stage {clone[1]} (1 reap 2 alloc 3 create 4 start 5 log 6 done) new tid {clone[2]}");
-        ulong* frames = stackalloc ulong[32];
-
-        for (int tid = 1; tid < 160; tid++)
-        {
-            int state = hbxl_thread_state(tid);
-            if (state == 0)
-                continue;
-
-            int n = state == 1 ? hbxl_thread_backtrace(tid, frames, 32) : 0;
-            var text = new System.Text.StringBuilder($"threads: tid {tid}:");
-            if (state != 1)
-                text.Append($" (state {state}: {(state == 3 ? "starting" : state == 2 ? "finished" : "?")})");
-            for (int k = 0; k < n; k++)
-                text.Append($" {frames[k]:x}");
-            Log(text.ToString());
-        }
-
-        Log("threads: end of dump");
-    }
 #else
     private static void hbxl_log(string text) => Console.Error.WriteLine(text);
 #endif
@@ -405,23 +352,23 @@ static unsafe partial class Program
             try
             {
 #if HBXL
-                // The update clock not moving for two intervals = the update thread is stuck: dump all threads once.
+                // The update clock not moving for two intervals = the update thread is stuck: say so once.
                 double clock = host.UpdateThread?.Clock.CurrentTime ?? -1;
                 stalled = clock == lastClock ? stalled + 1 : 0;
                 lastClock = clock;
                 if (stalled >= 2 && !dumped)
                 {
                     dumped = true;
-                    DumpThreads($"update clock stuck at {clock / 1000:F1}s");
+                    Log($"stall: update clock stuck at {clock / 1000:F1}s");
                 }
 
-                // A screen that has been loading for over 15 s (song select never finishes loading): dump once per screen.
+                // A screen that has been loading for over 15 s (song select never finishes loading): once per screen.
                 string? stuck = loadingScreen;
                 if (stuck != null && stuck != lastStuckScreen && stuckDumps < 3 && DateTime.UtcNow - loadingSince > TimeSpan.FromSeconds(15))
                 {
                     lastStuckScreen = stuck;
                     stuckDumps++;
-                    DumpThreads($"screen {stuck} still loading after {(DateTime.UtcNow - loadingSince).TotalSeconds:F0}s");
+                    Log($"stall: screen {stuck} still loading after {(DateTime.UtcNow - loadingSince).TotalSeconds:F0}s");
                 }
 #endif
                 var w = host.Window;
@@ -490,7 +437,7 @@ public partial class ConsoleOsuGame : OsuGame
         }
         catch (Exception e)
         {
-            // The shims keep their hbxl-env values; the section is left out.
+            // The shims keep their lx-env values; the section is left out.
             switch2Config = null;
             Program.Log($"switch2 settings FAILED: {e}");
         }
@@ -524,10 +471,6 @@ public partial class ConsoleOsuGame : OsuGame
             nextScreenshot = Clock.CurrentTime + screenshotEvery * 1000;
             takeScreenshot();
         }
-
-#if HBXL
-        Program.StallBeat(2); // update-thread heartbeat for the stall detector
-#endif
     }
 
     protected override void LoadComplete()

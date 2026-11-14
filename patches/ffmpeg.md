@@ -4,7 +4,7 @@ Upstream: [FFmpeg](https://ffmpeg.org/) tag `n7.1.1` (`ffmpeg.base`). Patch: `ff
 
 FFmpeg decodes the music and hitsounds for mysoundlib (osu-framework PR #6002). The version matches FFmpeg.AutoGen 7.1.1.
 `tools/build-ffmpeg.sh` configures a static, position-independent, **audio-only** build (decoders, demuxers and swresample osu! needs, no
-video, no programs) for the console into `build-hbx/`, and with the `desktop` argument an x86_64 shared build into
+video, no programs) for the island into `build-lx/`, and with the `desktop` argument an x86_64 shared build into
 `build-desktop/` for desktop comparison runs.
 
 As with OpenSSL, FFmpeg.AutoGen loads its libraries with dlopen; a generated table (`gen-ssl-syms.py --table ffmpeg` →

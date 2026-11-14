@@ -1,9 +1,9 @@
 # osu! (`src/osu`)
 
 Upstream: [ppy/osu](https://github.com/ppy/osu), base commit in `osu.base` (`28283cdbfd`, after 2026.1026.0). Patch:
-`osu.diff`. `~/osu` is the untouched clone; `src/osu` is the modified one the build uses.
+`osu.diff`. `src/osu` is the modified checkout the build uses.
 
-Every change sits behind `#if HBXL`, which `console/osu-game/build.sh` defines with `-p:HbxlBuild=true` (it must be on the
+Every change sits behind `#if HBXL` (the name comes from the HBLauncher version of this port), which `console/osu-game/build.sh` defines with `-p:HbxlBuild=true` (it must be on the
 dotnet command line, or it doesn't reach the referenced projects). A normal desktop build of this checkout is unchanged.
 
 ## NativeAOT
@@ -25,7 +25,7 @@ reflection; that one lives in this repository, not in the patch.
 
 | File | Change |
 |---|---|
-| `IO/HbxlFileResourceStore.cs` (new), `OsuGameBase.cs` | Game resources are loose files on the file server (`/osu-resources`, extracted on the PC), not an embedded DLL |
+| `IO/HbxlFileResourceStore.cs` (new), `OsuGameBase.cs` | Game resources are loose files on the SD card (`/switch/osu/osu-resources`, extracted on the PC with `tools/resource-extract`), not an embedded DLL |
 | `Overlays/SettingsOverlay.cs` | `CreateExtraSections`: lets the console app add its "Switch 2" settings section (`console/osu-game/Switch2Settings.cs`). Behind `HBXL_SETTINGS`, which the desktop test build (`HbxlDetachTest`) also defines |
 | `Beatmaps/WorkingBeatmapCache.cs` | `OSU_HBXL_NO_AUDIO=1` plays maps on a silent stopwatch-driven track (the pre-audio behaviour) |
 | `Rulesets/UI/FrameStabilityContainer.cs` | Catch up after long pauses instead of the 500 ms guard (a long GC pause froze gameplay for good) |
@@ -49,7 +49,8 @@ assembly. Unstamped (0.0.0), every saved layout fell back to the defaults. The c
 | `Online/Metadata/OnlineMetadataClient.cs` | ppy's server pushes updates to a self-built client on this hub but refuses every call it makes ("Realtime online functionality is not supported on this version of the game"). The first call of a connection is a probe; once refused, nothing more is sent on that connection and no notification is raised. Not worked around |
 | `Database/ModelDownloader.cs` | At most two downloads (download + import) at a time; more overlapping downloads froze the console in GC storms. Also gentle on ppy's servers |
 | `Screens/Play/SubmittingPlayer.cs` | No score submission token request (always refused for self-built clients; it showed "Score will not be submitted" every play). `OSU_HBXL_SUBMIT=1` asks anyway |
-| `Database/ImportTask.cs` | Archives are opened with a 1 MiB read buffer: each read is a round trip to the PC's file server, and the 4 KiB default made imports wait up to a minute |
+| `Database/ImportTask.cs` | Archives are opened with a 1 MiB read buffer. Written for HBLauncher, where each read was a round trip to the PC's file server and the 4 KiB default made imports wait up to a minute; kept, since fewer, larger reads also suit the SD card |
+| `Online/Notifications/WebSocket/WebSocketNotificationsClientConnector.cs` | Throws a real exception when the endpoint request fails (no network) instead of dereferencing the null response. Upstream relies on the NullReferenceException being caught; on the console a null dereference is a CPU fault that ends the process (no signals turn it into an exception) |
 
 Not in this patch but required: the console app's assembly version is `0.0.0` (`console/osu-game/osu-game.csproj`), like
 osu.Desktop built from source. With the default 1.0.0, osu! considered itself a deployed release, which sent API
@@ -61,5 +62,5 @@ Score submission is refused by ppy's server for self-built clients. That's by de
 
 ```sh
 git -C src/osu checkout -f 28283cdbfd2256c3bf6820aba2893f716588938b
-git -C src/osu apply --whitespace=nowarn ~/osu-HBLauncher/patches/osu.diff
+git -C src/osu apply --whitespace=nowarn patches/osu.diff
 ```
