@@ -464,6 +464,17 @@ public partial class ConsoleOsuGame : OsuGame
 #endif
     }
 
+    // osu!'s high performance session (gameplay): no GCs while a map plays (GameplayGcSession.cs).
+    // Cached by hand: this project doesn't run osu-framework's source generator for [Cached].
+    private readonly GameplayGcSession highPerformanceSessionManager = new();
+
+    protected override osu.Framework.Allocation.IReadOnlyDependencyContainer CreateChildDependencies(osu.Framework.Allocation.IReadOnlyDependencyContainer parent)
+    {
+        var dependencies = (osu.Framework.Allocation.DependencyContainer)base.CreateChildDependencies(parent);
+        dependencies.CacheAs<osu.Game.Performance.IHighPerformanceSessionManager>(highPerformanceSessionManager);
+        return dependencies;
+    }
+
     /// <summary>The "Switch 2" settings (Switch2Settings.cs): switch2.ini in osu!'s data folder, sent to the C shims.</summary>
     private Switch2Config? switch2Config;
 

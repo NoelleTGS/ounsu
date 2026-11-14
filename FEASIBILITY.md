@@ -315,3 +315,26 @@ empty and osu! never got past its database. What the runs found, in order:
   few in gameplay (3 of 80 GCs > 100 ms in speed1), each one an audio dropout ("mixing blocked") and a visible hitch.
   Most are allocation-triggered young GCs ("alloc 0"), which should take a few ms.
 - nxlink delivers stdout in bursts, so PC-side timestamps are only good to seconds (no startup-time comparison).
+
+## 2026-11-14: no GCs during gameplay (runs bgc1, nobgc1, nogc1)
+
+- **Cause of the gameplay hitches:** ConsoleOsuGame never cached an `IHighPerformanceSessionManager` (osu.Desktop
+  does), so gameplay ran in the default latency mode: blocking gen2s of 100-170 ms mid-map. BackgroundDataStoreProcessor
+  also never paused for gameplay.
+- **osu.Desktop's session (LowLatency) doesn't suit the console:** LowLatency pins the gen0 AND gen1 budgets at 256 KB
+  (gc.cpp `low_latency_alloc`), so a gen1 every 256 KB: ~14/s at ~4.6 ms each (run nobgc1), longer than a short audio
+  queue. /proc is not the cost (lx_fd.c answers ENOENT at once); it is real collection work.
+- **Background GC (run bgc1): rejected.** Song select kept blocking pauses of 110-240 ms; gen0 budget is capped at 6 MB
+  with concurrent GC (more GCs); audio stalls of 160-390 ms with no matching pause (likely allocations waiting for the
+  background GC). `ConcurrentGarbageCollection` stays false; `DOTNET_gcConcurrent` in lx-env overrides it either way.
+- **Fix: `console/osu-game/GameplayGcSession.cs`.** The session sets LowLatency, then starts a 1.5 GiB no-GC region
+  (`LX_NOGC_MB`, 0 = desktop behaviour); if a long map exhausts it, the runtime collects once and falls back to
+  LowLatency. HeapHardLimit 640 MiB -> 3 GiB, RegionRange 1 -> 4 GiB (kaiHEN has ~9 GiB). Run nogc1: 3 sessions
+  (220, 89, 773 MiB allocated, the last ~5.5 min), **zero GCs and zero audio dropouts during play**, region always
+  held. User: no major freezes during gameplay.
+- **Cost / for later (user: fine as is, no further optimisation for now):**
+  - The garbage is collected leaving the map: 255 + 326 ms after a 1-minute map, 562 + 446 ms after 773 MiB (the
+    plan phase walks the whole region, dead objects included: ~0.7 ms/MiB).
+  - Gameplay allocates ~4 MB/s, a lot for osu!: probably port glue per frame (input, display, audio). Less allocation
+    would shrink the post-map pause.
+  - Song select / loading GCs of 100-300 ms are unchanged (same slow GC work, no session there).

@@ -16,6 +16,8 @@
     <!-- Let osu! create named cultures ("en", ...) in invariant mode; they behave as invariant. -->
     <PredefinedCulturesOnly>false</PredefinedCulturesOnly>
     <StripSymbols>false</StripSymbols>
+    <!-- Background GC tried 2026-11-14 (run bgc1): no help in song select (blocking pauses of 110-240 ms remained),
+         gen0 budget capped at 6 MB, and audio stalls with no matching pause. Gameplay is handled by GameplayGcSession. -->
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <ServerGarbageCollector>false</ServerGarbageCollector>
     <!-- osu sets this in its Directory.Build.props; keep the trim warnings visible here. -->
@@ -71,13 +73,11 @@
     <TrimmerRootAssembly Include="ppy.Veldrid" />
   </ItemGroup>
   <ItemGroup>
-    <!-- 640 MiB inside the 1 GiB RegionRange below (768 froze again 2026-11-09 evening: back-to-back allocation GCs of
-         ~180 ms with ~350 MiB live, while downloading 3 maps from the profile; 640/1024 passed the same PC stress test).
-         Was: 768 MiB inside the 1 GiB RegionRange below (real memory on hbxl: its mmap commits eagerly). The GC needs well over
-         100 MiB of range headroom above what it commits: 960 MiB / 1 GiB crashed the GC in make_heap_segment on the PC
-         (reproduced 2026-11-09) and froze osu! on the console in back-to-back 200 ms full GCs. 768 / 1 GiB survives it. -->
-    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="671088640" />
-    <RuntimeHostConfigurationOption Include="System.GC.RegionRange" Value="1073741824" />
+    <!-- kaiHEN gives the process ~9 GiB (hbxl had 640 MiB inside a 1 GiB range, its mmap committed eagerly; the GC needs
+         well over 100 MiB of range headroom above the limit). The room is for GameplayGcSession's no-GC region during
+         gameplay (default 1.5 GiB of garbage collected after the map). -->
+    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="3221225472" />
+    <RuntimeHostConfigurationOption Include="System.GC.RegionRange" Value="4294967296" />
   </ItemGroup>
   <PropertyGroup>
     <!-- Audio: osu-framework's SDL3 backend (PR #6002) with mysoundlib compiled in. On for the console build; the desktop

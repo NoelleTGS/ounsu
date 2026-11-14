@@ -52,9 +52,10 @@ default**; nxlink is only a development log channel. Never design features aroun
     **Resolution per console mode + 120 Hz done** (ABI 7, run 17): `lx/host/lx_display.c`, Switch 2 -> Display
     settings, live swapchain recreation on dock/undock and setting changes (FEASIBILITY.md 2026-11-14). The host now
     pumps `appletMainLoop` (in `display_get`); HOME menu / exit request behaviour not yet tested.
-    1. Consider OptimizationPreference=Speed (the Size setting was for hbxl's 240 MiB SDK heap). Maps play fine (user,
-       2026-11-14).
-    2. Later (user's wish): USB drawing tablets.
+    Also done 2026-11-14: OptimizationPreference=Speed, and **no GCs during gameplay** (`GameplayGcSession.cs`:
+    no-GC region per map, heap limit 3 GiB; FEASIBILITY.md has the leftover pauses outside gameplay, parked by the user).
+    1. Later (user's wish): USB drawing tablets.
+    2. Not important to the user yet: HOME menu / sleep / close-from-HOME handling.
   - **Workflow:** `sh console/osu-game/build.sh` (~15 min, ILC) or `LX_SKIP_PUBLISH=1 sh console/osu-game/build.sh`
     (relink, ~70 s). Claude sends builds itself so the log can be read: `nxlink -s -a 192.168.1.177 <nro> >
     logs/<name>.log 2>&1` in the background (the user puts hbmenu in netloader mode with Y), plus a Monitor on the log.
@@ -136,7 +137,7 @@ NativeAOT). The nn::hid / six-axis / keyboard **SDK offsets** were for SmileBASI
 - **NativeAOT + JSON:** `rd.xml` from `tools/gen-rdxml` (build.sh regenerates it); `OSU_HBXL_JSON_SELFTEST=1`.
 - **Metadata hub:** `HbxlMessagePackHubProtocol` + `HbxlHubTypes` (stock SignalR protocol needs expression trees);
   self-tests `OSU_HBXL_HUB_SELFTEST`, `probes/hub-probe`. Only the metadata hub; spectator/multiplayer are never contacted.
-- **GC:** HeapHardLimit (640 MiB) well below GCRegionRange (1 GiB); no GCConserveMemory; never allocate >85 KB arrays per
+- **GC:** HeapHardLimit well below GCRegionRange (hbxl: 640 MiB / 1 GiB; kaiHEN: 3 / 4 GiB); no GCConserveMemory; never allocate >85 KB arrays per
   audio track (LOH fragmentation; songs are decoded into 64 KiB segments).
 - **Never put a repeating task on the game's scheduler** (`Scheduler.AddDelayed(..., repeat: true)`): "Too many timed
   tasks" crash. Periodic work goes in `Update()`.
