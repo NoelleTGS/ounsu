@@ -25,9 +25,9 @@
     <RuntimeIdentifier>linux-musl-arm64</RuntimeIdentifier>
     <StaticExecutable>true</StaticExecutable>
     <DefineConstants>$(DefineConstants);HBXL</DefineConstants>
-    <!-- The code image must fit the console's SDK heap (~240 MiB, shared with data, the
-         runtime's first chunk and thread stacks): smaller code, English only. -->
-    <OptimizationPreference>Size</OptimizationPreference>
+    <!-- kaiHEN gives the process ~9 GiB, so code size no longer matters (hbxl needed Size for its ~240 MiB SDK heap).
+         English only. -->
+    <OptimizationPreference>Speed</OptimizationPreference>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
   <PropertyGroup Condition="'$(HbxlBuild)' == 'true' Or '$(HbxlDetachTest)' == 'true'">

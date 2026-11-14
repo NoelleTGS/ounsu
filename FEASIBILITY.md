@@ -304,3 +304,14 @@ empty and osu! never got past its database. What the runs found, in order:
   already has the right size.
 - `LX_LOG_FILE=<island path>` in lx-env: a copy of the whole log on the SD card (undocking cuts nxlink).
 - The ShadowCast (1080p60) captures only black at 1440p/120 Hz: use 1080p + 60 fps for captures.
+
+## 2026-11-14: OptimizationPreference=Speed (run speed1)
+
+- Size was for hbxl's ~240 MiB SDK heap; kaiHEN has ~9 GiB. Speed: code 113 MB vs 103 MB, .nro 178 MB vs 168 MB,
+  ILC ~6 min. Run speed1 (1440p/120, 3 maps, clean exit) against joymouse-2 (Size, 1080p/60, 2 maps): GC work in
+  gameplay median 9.0 / p90 29.7 / max 169 ms (Size: 9.0 / 34.7 / 136), outside gameplay 13.7 / 65 / 310 ms (Size:
+  17.1 / 77 / 353). 120 fps held at 1440p. User: about the same as Size, maybe a little better. Kept.
+- **The real problem is long GC pauses** in both builds: 100-300 ms, mostly in song select and map loading, but also a
+  few in gameplay (3 of 80 GCs > 100 ms in speed1), each one an audio dropout ("mixing blocked") and a visible hitch.
+  Most are allocation-triggered young GCs ("alloc 0"), which should take a few ms.
+- nxlink delivers stdout in bursts, so PC-side timestamps are only good to seconds (no startup-time comparison).
