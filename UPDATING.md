@@ -35,31 +35,43 @@ df -h /                          # a full build plus NuGet restores needs a few 
 
 Write down the current bases (`cat patches/osu.base patches/osu-framework.base`): rollback goes back to them.
 
-## 1. Pick the target tag
+## 1. Pick the target: the newest release
 
-ppy/osu has two kinds of tags:
+The target is the **newest GitHub release** of ppy/osu
+([github.com/ppy/osu/releases](https://github.com/ppy/osu/releases)), stable or tachyon, whichever is newer. Every
+release points at a tag, and that tag is what we rebase onto.
 
-- `YYYY.MDD.N` (e.g. `2026.1026.0`): **stable** lazer releases. Normally you want one of these.
-- `YYYY.MDD.N-tachyon` (and the odd `-lazer`): the **experimental/"tachyon"** release stream. Newer, but it can carry
-  half-finished features.
+- Stable releases are marked **Latest** on GitHub (tags like `2026.1005.0-lazer`).
+- **Tachyon** releases (`2026.1110.0-tachyon`) are marked **Pre-release**. They come out more often, so the newest
+  release is usually one of these.
+- Don't go by the tag list alone: ppy pushes tags that never get a release, or get one days later (on 2026-11-14
+  `2026.1114.0-tachyon` was a tag without a release yet, and plain `2026.1026.0` never got one). Only take a tag
+  once its release is published.
 
-List the newest of both kinds:
-
-```sh
-git ls-remote --tags https://github.com/ppy/osu.git 'refs/tags/20*' | grep -v '\^{}' \
-  | sed 's,.*refs/tags/,,' | sort -V | tail -15
-```
-
-The `sort -V` matters: `git ls-remote --sort` puts tachyon tags in odd places. Check the release notes on
-GitHub or at osu.ppy.sh/home/changelog, and skim them for anything that touches what we patch: audio, online/hubs,
-settings, skinning or Realm migrations.
-
-Fetch the tag into `src/osu` (straight from GitHub, not via `origin`):
+Get the newest release's tag (pre-releases count, drafts don't):
 
 ```sh
-T=2026.1114.0-tachyon            # your target osu! tag
-git -C src/osu fetch https://github.com/ppy/osu.git tag "$T" --no-tags
+gh release list -R ppy/osu --limit 5            # look at it: newest first, Latest / Pre-release
+T=$(gh release list -R ppy/osu --limit 1 --json tagName -q '.[0].tagName')
+echo "$T"
 ```
+
+Without `gh`: `curl -s 'https://api.github.com/repos/ppy/osu/releases?per_page=1' | jq -r '.[0].tag_name'`
+(also newest first, pre-releases included).
+
+Read its release notes (on GitHub or at osu.ppy.sh/home/changelog) and look for anything that touches what we patch:
+audio, online/hubs, settings, skinning or Realm migrations.
+
+Check that the release is ahead of our current base. The base itself may be an untagged commit past an older release:
+
+```sh
+git -C src/osu fetch https://github.com/ppy/osu.git tag "$T" --no-tags   # straight from GitHub, not via origin (~/osu)
+git -C src/osu merge-base --is-ancestor HEAD "$T" && echo "ahead of our base: OK"
+git -C src/osu rev-list --count "$T"..HEAD      # 0 = we lose nothing; >0 = our base has commits the release lacks
+```
+
+If the release isn't ahead of our base (`rev-list` shows a number above 0), moving to it would go backwards for those
+commits. Usually you wait for the next release then.
 
 ### Find the matching framework and resources versions
 
@@ -71,10 +83,10 @@ git -C src/osu show "$T":osu.Game/osu.Game.csproj \
 ```
 
 `ppy.osu.Framework` is the framework **tag** to rebase onto (framework tags have the same names as its NuGet versions).
-Fetch it:
+If it's the same as `patches/osu-framework.base`, skip step 2: the framework stays as it is. Otherwise fetch it:
 
 ```sh
-F=2026.1114.0                    # the ppy.osu.Framework version from above
+F=2026.1030.0                    # the ppy.osu.Framework version from above
 git -C src/osu-framework fetch origin tag "$F" --no-tags   # this checkout's origin is GitHub
 ```
 
@@ -186,7 +198,7 @@ Skip this step if `ppy.osu.Game.Resources` didn't change. Otherwise the SD card 
 elements, and the build would still embed the new resources (the substitutions file only removes the ones it lists).
 
 ```sh
-R=2026.1112.1                    # the new ppy.osu.Game.Resources version
+R=2026.1110.0                    # the new ppy.osu.Game.Resources version
 dotnet restore console/osu-game -p:HbxlBuild=true   # downloads the package into ~/.nuget/packages
 DLL=~/.nuget/packages/ppy.osu.game.resources/$R/lib/net8.0/osu.Game.Resources.dll   # check the lib/ folder name
 dotnet run --project tools/resource-extract -c Release -- list "$DLL"     # optional: what's inside
