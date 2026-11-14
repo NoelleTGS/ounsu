@@ -28,7 +28,7 @@ when you quit. Working so far:
 
 Not done yet: HOME menu, sleep and closing from the HOME menu are not handled, and USB drawing tablets aren't
 supported. A crash (a CPU fault) ends the whole game process: kaiHEN doesn't pass exceptions to homebrew. The progress
-log is in `FEASIBILITY.md` and the hardware tests are in `TESTING.md`.
+log is in `FEASIBILITY.md` and the hardware tests are in `TESTING.md`. Moving to a newer osu! release: `UPDATING.md`.
 
 An earlier version of this port ran on HBLauncher (SmileBASIC host, PC file server). That version lives in a separate
 repository; this one started fresh.

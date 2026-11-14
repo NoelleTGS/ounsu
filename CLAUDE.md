@@ -9,7 +9,8 @@ osu! was playable with audio, online features, unplugged play and an in-game "Sw
 CLAUDE.md (`~/osu-HBLauncher/CLAUDE.md`) holds every hbxl-era finding in
 detail. Read it before you assume something has to be rediscovered. `FEASIBILITY.md` (dated log: append, don't
 rewrite), `TESTING.md` and `README.md` were restarted for kaiHEN on 2026-11-13; the hbxl versions are
-in `~/osu-HBLauncher` (`git -C ~/osu-HBLauncher show c11053a:<file>`).
+in `~/osu-HBLauncher` (`git -C ~/osu-HBLauncher show c11053a:<file>`). Moving to a newer osu!/osu-framework release:
+`UPDATING.md`.
 
 **Keep the repo lean (user's wish):** remove HBLauncher/hbxl-only material instead of carrying it along (SmileBASIC,
 file server, offline mirror, PC-link UI, UDP diagnostics, range mapping). The game runs **fully disconnected by
