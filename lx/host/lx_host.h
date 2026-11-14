@@ -31,6 +31,7 @@ void lx_mem_release_all(void);
 
 /* lx_fd.c */
 void lx_fd_init(const char *root);
+void lx_fd_use_romfs(int mounted);
 const char *lx_fd_root(void);
 void lx_fd_setup_console(void);
 long lx_errno(int newlib_errno);
@@ -56,6 +57,26 @@ int lx_fd_poll_state(int fd, int events);
 long lx_getcwd(char *buf, size_t size);
 long lx_chdir(const char *path);
 long lx_statfs(void *out);
+
+/* lx_net.c */
+long lx_socket(int domain, int type, int protocol);
+long lx_connect(int fd, const void *addr, uint32_t len);
+long lx_bind(int fd, const void *addr, uint32_t len);
+long lx_listen(int fd, int backlog);
+long lx_accept4(int fd, void *addr, uint32_t *len, int flags);
+long lx_recvfrom(int fd, void *buf, size_t len, int flags, void *addr, uint32_t *addrlen);
+long lx_sendto(int fd, const void *buf, size_t len, int flags, const void *addr, uint32_t addrlen);
+long lx_sendmsg(int fd, const void *msg, int flags);
+long lx_recvmsg(int fd, void *msg, int flags);
+long lx_shutdown(int fd, int how);
+long lx_getsockname(int fd, void *addr, uint32_t *len, int peer);
+long lx_setsockopt(int fd, int level, int name, const void *val, uint32_t len);
+long lx_getsockopt(int fd, int level, int name, void *val, uint32_t *len);
+long lx_sock_ioctl(int fd, unsigned long req, void *arg);
+long lx_epoll_create(int flags);
+long lx_epoll_ctl(int epfd, int op, int fd, const void *ev);
+long lx_epoll_wait(int epfd, void *events, int max, int timeout_ms);
+int lx_resolve_ipv4(const char *name, uint32_t *out, int max);
 
 /* lx_vulkan.c (hosts built with VULKAN=1) */
 void *lx_vk_get_instance_proc_addr(void *instance, const char *name);

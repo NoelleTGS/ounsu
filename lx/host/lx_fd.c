@@ -23,46 +23,9 @@
 #include <sys/statvfs.h>
 #include <unistd.h>
 
-#include "lx_host.h"
+#include "lx_fd.h"
 
-#define MAX_FDS 1024
 #define PIPE_SIZE (64u << 10)
-
-/* Linux open flags (aarch64) */
-#define L_O_ACCMODE 3
-#define L_O_CREAT 0100
-#define L_O_EXCL 0200
-#define L_O_TRUNC 01000
-#define L_O_APPEND 02000
-#define L_O_NONBLOCK 04000
-#define L_O_DIRECTORY 040000
-#define L_O_CLOEXEC 02000000
-#define L_AT_FDCWD (-100)
-#define L_AT_EMPTY_PATH 0x1000
-#define L_AT_REMOVEDIR 0x200
-
-enum fd_kind { FD_FREE, FD_CONSOLE, FD_NULL, FD_ZERO, FD_RANDOM, FD_FILE, FD_DIR, FD_PIPE_R, FD_PIPE_W };
-
-struct pipe_buf {
-    Mutex lock;
-    CondVar cond;
-    uint8_t *data;
-    size_t head, len;
-    int readers, writers;
-};
-
-struct fd {
-    enum fd_kind kind;
-    int host_fd;      /* FD_FILE: newlib fd */
-    DIR *dir;         /* FD_DIR */
-    long dir_pos;     /* FD_DIR: entries returned so far */
-    char *path;       /* FD_FILE/FD_DIR: host path (for fstat on directories, getdents, relative lookups) */
-    char *lx_path;    /* the island's path, for *at() relative to this fd */
-    int flags;        /* Linux status flags (O_APPEND, O_NONBLOCK) */
-    int cloexec;
-    struct pipe_buf *pipe;
-    int refs;         /* fds sharing this description (dup) */
-};
 
 static struct fd *g_fds[MAX_FDS];
 static Mutex g_fd_lock;
@@ -98,6 +61,27 @@ long lx_errno(int e) {
     case ELOOP: return -40;
     case EOVERFLOW: return -75;
     case ENOTSUP: return -95;
+    case EPIPE: return -32;
+    case ENOTSOCK: return -88;
+    case EMSGSIZE: return -90;
+    case ENOPROTOOPT: return -92;
+    case EPROTONOSUPPORT: return -93;
+    case EAFNOSUPPORT: return -97;
+    case EADDRINUSE: return -98;
+    case EADDRNOTAVAIL: return -99;
+    case ENETDOWN: return -100;
+    case ENETUNREACH: return -101;
+    case ECONNABORTED: return -103;
+    case ECONNRESET: return -104;
+    case ENOBUFS: return -105;
+    case EISCONN: return -106;
+    case ENOTCONN: return -107;
+    case ETIMEDOUT: return -110;
+    case ECONNREFUSED: return -111;
+    case EHOSTDOWN: return -112;
+    case EHOSTUNREACH: return -113;
+    case EALREADY: return -114;
+    case EINPROGRESS: return -115;
     default: return -LX_EIO;
     }
 }
@@ -214,9 +198,24 @@ static void host_path(const char *lx_path, char *out, size_t cap) {
     snprintf(out, cap, "%s%s", g_root, strcmp(lx_path, "/") == 0 ? "" : lx_path);
 }
 
+/* Files bundled in the .nro's romfs (a build can put small read-only files there, e.g. a CA bundle) are found
+   when the SD card has no file of that name. */
+static int g_romfs;
+
+void lx_fd_use_romfs(int mounted) {
+    g_romfs = mounted;
+}
+
+static int romfs_path(const char *lx_path, char *out, size_t cap) {
+    if (!g_romfs) return 0;
+    snprintf(out, cap, "romfs:%s", lx_path);
+    struct stat st;
+    return stat(out, &st) == 0;
+}
+
 /* ---- the table ---------------------------------------------------------------------------------------------- */
 
-static int fd_install(struct fd *f, int min) {
+int fd_install(struct fd *f, int min) {
     mutexLock(&g_fd_lock);
     for (int i = min; i < MAX_FDS; i++) {
         if (!g_fds[i]) {
@@ -229,16 +228,18 @@ static int fd_install(struct fd *f, int min) {
     return -24; /* EMFILE */
 }
 
-static struct fd *fd_get(int fd) {
+struct fd *fd_get(int fd) {
     return fd >= 0 && fd < MAX_FDS ? g_fds[fd] : NULL;
 }
 
-static struct fd *fd_new(enum fd_kind kind) {
+struct fd *fd_new(enum fd_kind kind) {
     struct fd *f = calloc(1, sizeof *f);
     if (f) {
         f->kind = kind;
         f->host_fd = -1;
         f->refs = 1;
+        static uint64_t next_gen;
+        f->gen = __atomic_add_fetch(&next_gen, 1, __ATOMIC_RELAXED);
     }
     return f;
 }
@@ -258,11 +259,13 @@ static void pipe_release(struct pipe_buf *p, int writer) {
     }
 }
 
-static void fd_free(struct fd *f) {
+void fd_free(struct fd *f) {
     if (--f->refs > 0) return;
     if (f->kind == FD_FILE && f->host_fd >= 0) close(f->host_fd);
     if (f->kind == FD_DIR && f->dir) closedir(f->dir);
     if (f->kind == FD_PIPE_R || f->kind == FD_PIPE_W) pipe_release(f->pipe, f->kind == FD_PIPE_W);
+    if (f->kind == FD_SOCKET && f->host_fd >= 0) close(f->host_fd);
+    if (f->kind == FD_EPOLL) lx_epoll_free(f->epoll);
     free(f->path);
     free(f->lx_path);
     free(f);
@@ -299,6 +302,8 @@ long lx_openat(int dirfd, const char *path, int flags, int mode) {
         struct stat st;
         host_path(lp, hp, sizeof hp);
         int exists = stat(hp, &st) == 0;
+        if (!exists && (flags & L_O_ACCMODE) == 0 && !(flags & L_O_CREAT) && romfs_path(lp, hp, sizeof hp))
+            exists = stat(hp, &st) == 0;
         if (exists && S_ISDIR(st.st_mode)) {
             if ((flags & L_O_ACCMODE) != 0) return -21; /* EISDIR */
             DIR *d = opendir(hp);
@@ -409,6 +414,7 @@ long lx_read(int fd, void *buf, size_t len) {
     }
     case FD_DIR: return -21; /* EISDIR */
     case FD_PIPE_R: return pipe_read(f, buf, len);
+    case FD_SOCKET: return lx_sock_recv(f, buf, len, 0);
     default: return -LX_EBADF;
     }
 }
@@ -428,6 +434,7 @@ long lx_write(int fd, const void *buf, size_t len) {
         return n < 0 ? lx_errno(errno) : n;
     }
     case FD_PIPE_W: return pipe_write(f, buf, len);
+    case FD_SOCKET: return lx_sock_send(f, buf, len, 0);
     default: return -LX_EBADF;
     }
 }
@@ -469,6 +476,8 @@ long lx_fstat(int fd, void *out) {
     case FD_CONSOLE: special_stat(0020000 | 0620, 10 + (uint64_t)fd, out); return 0; /* character device */
     case FD_NULL: case FD_ZERO: case FD_RANDOM: special_stat(0020000 | 0666, 20 + f->kind, out); return 0;
     case FD_PIPE_R: case FD_PIPE_W: special_stat(0010000 | 0600, (uintptr_t)f->pipe, out); return 0; /* FIFO */
+    case FD_SOCKET: special_stat(0140000 | 0777, 100000 + (uint64_t)f->host_fd, out); return 0;
+    case FD_EPOLL: special_stat(0600, (uintptr_t)f->epoll, out); return 0;
     case FD_FILE:
         if (fstat(f->host_fd, &st) != 0) return lx_errno(errno);
         to_lx_stat(&st, f->path, out);
@@ -501,7 +510,10 @@ long lx_fstatat(int dirfd, const char *path, void *out, int flags) {
         return -LX_ENOENT;
     }
     host_path(lp, hp, sizeof hp);
-    if (stat(hp, &st) != 0) return lx_errno(errno);
+    if (stat(hp, &st) != 0) {
+        int e = errno;
+        if (!romfs_path(lp, hp, sizeof hp) || stat(hp, &st) != 0) return lx_errno(e);
+    }
     to_lx_stat(&st, hp, out);
     return 0;
 }
@@ -682,6 +694,10 @@ int lx_fd_poll_state(int fd, int events) {
         if (f->pipe->len < PIPE_SIZE) ready |= 4;
         if (!f->pipe->readers) ready |= 0x08; /* POLLERR */
         mutexUnlock(&f->pipe->lock);
+    } else if (f->kind == FD_SOCKET) {
+        ready = lx_sock_poll_state(f, events);
+    } else if (f->kind == FD_EPOLL) {
+        ready = 0;
     } else if (f->kind == FD_CONSOLE && f->host_fd == 0) {
         ready = 0; /* stdin never has input */
     } else {

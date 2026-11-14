@@ -22,6 +22,8 @@ OUT        ?= $(CURDIR)/build
 ICON       ?= $(DEVKITPRO)/libounce/default_icon.jpg
 # VULKAN=1: link OunceVK and hand Vulkan to the island (lx_vulkan.c).
 VULKAN     ?= 0
+# ROMFS=dir: bundle that folder as the .nro's romfs (read-only files the island finds when the SD card lacks them).
+ROMFS      ?=
 # The island's "/" on the SD card.
 LX_ROOT    ?= sdmc:/switch/$(APP)
 
@@ -72,8 +74,9 @@ $(OUT)/$(APP).nacp:
 	@mkdir -p $(OUT)
 	$(TOOLS)/nacptool --create "$(APP_TITLE)" "$(APP_AUTHOR)" "$(APP_VERSION)" $@
 
+.PHONY: $(OUT)/$(APP).nro
 $(OUT)/$(APP).nro: $(OUT)/$(APP).elf $(OUT)/$(APP).nacp
-	$(TOOLS)/elf2nro $< $@ --icon=$(ICON) --nacp=$(OUT)/$(APP).nacp
+	$(TOOLS)/elf2nro $< $@ --icon=$(ICON) --nacp=$(OUT)/$(APP).nacp $(if $(ROMFS),--romfsdir=$(ROMFS))
 
 clean:
 	rm -rf $(OUT)

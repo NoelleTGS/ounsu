@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Networking probe for hbxl (sockets, epoll, DNS, TLS, HttpClient, WebSocket).  Build with ./build.sh. -->
+  <!-- Networking probe for the lx host on kaiHEN (sockets, epoll, DNS, TLS, HttpClient, WebSocket). Build with ./build.sh. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -17,9 +17,8 @@
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="134217728" />
     <RuntimeHostConfigurationOption Include="System.GC.RegionRange" Value="268435456" />
-    <!-- hbxl sockets are IPv4 only: never try AF_INET6 / dual-mode sockets. -->
+    <!-- The host's sockets are IPv4 only: never try AF_INET6 / dual-mode sockets. -->
     <RuntimeHostConfigurationOption Include="System.Net.DisableIPv6" Value="true" />
     <DirectPInvoke Include="libc" />
-    <DirectPInvoke Include="hbxl" />
   </ItemGroup>
 </Project>

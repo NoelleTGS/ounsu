@@ -95,6 +95,7 @@ int main(int argc, char **argv) {
     host.syscall = lx_syscall;
     host.clone = lx_clone;
     host.log = island_log;
+    host.resolve_ipv4 = lx_resolve_ipv4;
 #ifdef LX_VULKAN
     /* The window is 1280x720 by default. A swapchain of another size presents as VK_SUBOPTIMAL_KHR, the program
        (Veldrid) recreates it, and a second swapchain on the console's window fails (gfx-probe, 2026-11-13). Size the
@@ -128,7 +129,9 @@ int main(int argc, char **argv) {
 
     lx_fd_setup_console();
     lx_fd_init(LX_ROOT);
-    lx_logf("lx: island root is %s", lx_fd_root());
+    int romfs = R_SUCCEEDED(romfsInit());
+    lx_fd_use_romfs(romfs);
+    lx_logf("lx: island root is %s%s", lx_fd_root(), romfs ? " (+ the .nro's romfs)" : "");
 
     void *stack = aligned_alloc(4096, LX_MAIN_STACK);
     if (!stack) {
@@ -152,6 +155,7 @@ int main(int argc, char **argv) {
     free(stack);
     lx_logf("lx: released %zu KiB of island memory", mapped >> 10);
 
+    if (romfs) romfsExit();
     lx_logf("lx: back to hbmenu");
     socketExit();
     return code;

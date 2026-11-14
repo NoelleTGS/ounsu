@@ -22,6 +22,11 @@ int __libc_start_main(int (*)(int, char **, char **), int, char **, void (*)(voi
 
 static const struct lx_host *g_host;
 
+/* For the island runtime's other files. */
+__attribute__((visibility("hidden"))) const struct lx_host *lx_island_host(void) {
+    return g_host;
+}
+
 /* C++ code registers its static destructors against this (normally from crtbegin.o, which the island doesn't use). */
 void *__dso_handle = &__dso_handle;
 

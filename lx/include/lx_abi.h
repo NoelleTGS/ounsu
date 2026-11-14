@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LX_ABI_VERSION 2
+#define LX_ABI_VERSION 3
 
 /* Private syscall numbers (above Linux's range), used by the island runtime only. */
 #define LX_SYS_UNMAPSELF 0x10000 /* (base, size): unmap the calling thread's stack and end the thread */
@@ -36,6 +36,10 @@ struct lx_host {
        instances and devices), and the console's default window for VK_NN_vi_surface (an NWindow *). */
     void *(*vk_get_instance_proc_addr)(void *instance, const char *name);
     void *vi_window;
+
+    /* Name resolution through the console's resolver: IPv4 addresses (network byte order) for a host name. Returns
+       how many, 0 if the name doesn't resolve, -1 if the resolver failed. */
+    int (*resolve_ipv4)(const char *name, uint32_t *out, int max);
 
     /* Image layout of the final .nro, for musl's static TLS (PT_TLS) and the unwinder (PT_GNU_EH_FRAME). */
     uintptr_t tls_image, tls_filesz, tls_memsz, tls_align;

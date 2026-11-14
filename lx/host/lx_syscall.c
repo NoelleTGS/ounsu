@@ -72,6 +72,20 @@ struct lx_pollfd {
     int16_t events, revents;
 };
 
+/* preadv/pwritev(2): one positioned transfer per iovec; offset -1 (the v2 calls) = the current position. */
+static long sys_prw_vec(int fd, const struct lx_iovec *iov, int count, long off, int is_write) {
+    long total = 0;
+    for (int i = 0; i < count; i++) {
+        if (!iov[i].len) continue;
+        long n = off < 0 ? (is_write ? lx_write(fd, iov[i].base, iov[i].len) : lx_read(fd, iov[i].base, iov[i].len))
+                         : lx_pread(fd, iov[i].base, iov[i].len, off + total, is_write);
+        if (n < 0) return total ? total : n;
+        total += n;
+        if ((size_t)n < iov[i].len) break;
+    }
+    return total;
+}
+
 static long sys_rw_vec(int fd, const struct lx_iovec *iov, int count, int is_write) {
     long total = 0;
     for (int i = 0; i < count; i++) {
@@ -163,6 +177,10 @@ long lx_syscall(long n, long a, long b, long c, long d, long e, long f) {
     case 67: return lx_pread((int)a, (void *)b, (size_t)c, d, 0);                         /* pread64 */
     case 68: return lx_pread((int)a, (void *)b, (size_t)c, d, 1);                         /* pwrite64 */
     case 62: return lx_lseek((int)a, b, (int)c);                                          /* lseek */
+    case 69: return sys_prw_vec((int)a, (const struct lx_iovec *)b, (int)c, d, 0);       /* preadv */
+    case 70: return sys_prw_vec((int)a, (const struct lx_iovec *)b, (int)c, d, 1);       /* pwritev */
+    case 286: return sys_prw_vec((int)a, (const struct lx_iovec *)b, (int)c, d, 0);      /* preadv2 */
+    case 287: return sys_prw_vec((int)a, (const struct lx_iovec *)b, (int)c, d, 1);      /* pwritev2 */
     case 80: return lx_fstat((int)a, (void *)b);                                          /* fstat */
     case 79: return lx_fstatat((int)a, (const char *)b, (void *)c, (int)d);              /* newfstatat */
     case 291: return -LX_ENOSYS;                                          /* statx: musl falls back to fstatat */
@@ -185,14 +203,37 @@ long lx_syscall(long n, long a, long b, long c, long d, long e, long f) {
     case 43: case 44: return lx_statfs((void *)b);                                        /* statfs/fstatfs */
     case 32: return 0;                                                                    /* flock: granted */
     case 52: case 53: case 88: return 0;                                  /* fchmod(at)/utimensat */
-    case 29:                                                                              /* ioctl */
+    case 29: {                                                                            /* ioctl */
         if ((a == 1 || a == 2) && b == 0x5413 /* TIOCGWINSZ */) {
             /* Pretend stdout/stderr are terminals: musl then line-buffers them, so log lines leave promptly. */
             struct lx_winsize *w = (struct lx_winsize *)c;
             if (w) *w = (struct lx_winsize){ 25, 120, 0, 0 };
             return 0;
         }
-        return -LX_ENOTTY;
+        long r = lx_sock_ioctl((int)a, (unsigned long)b, (void *)c);
+        return r == -88 /* not a socket */ ? -LX_ENOTTY : r;
+    }
+
+    /* sockets and epoll (lx_net.c) */
+    case 198: return lx_socket((int)a, (int)b, (int)c);                                    /* socket */
+    case 199: return -97;                                                  /* socketpair: EAFNOSUPPORT */
+    case 200: return lx_bind((int)a, (const void *)b, (uint32_t)c);                       /* bind */
+    case 201: return lx_listen((int)a, (int)b);                                           /* listen */
+    case 202: return lx_accept4((int)a, (void *)b, (uint32_t *)c, 0);                     /* accept */
+    case 242: return lx_accept4((int)a, (void *)b, (uint32_t *)c, (int)d);                /* accept4 */
+    case 203: return lx_connect((int)a, (const void *)b, (uint32_t)c);                    /* connect */
+    case 204: return lx_getsockname((int)a, (void *)b, (uint32_t *)c, 0);                 /* getsockname */
+    case 205: return lx_getsockname((int)a, (void *)b, (uint32_t *)c, 1);                 /* getpeername */
+    case 206: return lx_sendto((int)a, (const void *)b, (size_t)c, (int)d, (const void *)e, (uint32_t)f); /* sendto */
+    case 207: return lx_recvfrom((int)a, (void *)b, (size_t)c, (int)d, (void *)e, (uint32_t *)f);       /* recvfrom */
+    case 208: return lx_setsockopt((int)a, (int)b, (int)c, (const void *)d, (uint32_t)e); /* setsockopt */
+    case 209: return lx_getsockopt((int)a, (int)b, (int)c, (void *)d, (uint32_t *)e);     /* getsockopt */
+    case 210: return lx_shutdown((int)a, (int)b);                                         /* shutdown */
+    case 211: return lx_sendmsg((int)a, (const void *)b, (int)c);                         /* sendmsg */
+    case 212: return lx_recvmsg((int)a, (void *)b, (int)c);                               /* recvmsg */
+    case 20: return lx_epoll_create((int)a);                                              /* epoll_create1 */
+    case 21: return lx_epoll_ctl((int)a, (int)b, (int)c, (const void *)d);                /* epoll_ctl */
+    case 22: return lx_epoll_wait((int)a, (void *)b, (int)c, (int)d);                     /* epoll_pwait */
 
     /* memory */
     case 222: return lx_mmap((uintptr_t)a, (size_t)b, (int)c, (int)d, (int)e, f);        /* mmap */
@@ -265,6 +306,5 @@ long lx_syscall(long n, long a, long b, long c, long d, long e, long f) {
     case 236: case 237: return -LX_ENOSYS;                                /* get_mempolicy/mbind */
     }
     unknown_syscall(n);
-    (void)e;
     return -LX_ENOSYS;
 }

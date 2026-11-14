@@ -14,8 +14,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-// Networking probe for hbxl (osu-HBLauncher TESTING.md test 7).  Every stage logs before it runs (raw write(2),
-// no System.Console), so the last "stage N" line in last-run.log says where it stopped.
+// Networking probe for the lx host on kaiHEN (TESTING.md test 5). Every stage logs before it runs (raw write(2),
+// no System.Console), so the last "stage N" line in the nxlink log says where it stopped.
 //
 // Load, concurrency and throughput all go to tools/net-probe-server.py on the PC.  The only request to osu!'s
 // servers is the last stage: one HTTPS GET, 5 s after everything else (NETPROBE_SKIP_OSU=1 skips it).
@@ -34,7 +34,8 @@ static partial class Program
     }
 
     private static readonly string host = Environment.GetEnvironmentVariable("NETPROBE_HOST") ?? "192.168.1.206";
-    // Desktop runs: NETPROBE_ROOT=~/osu-HBLauncher/fsroot (on the console "/" is already the file server's root).
+    // Desktop runs: NETPROBE_ROOT=<folder with net-probe/ca.pem> (on the console "/" is the island's root; the CA comes
+    // from the .nro's romfs).
     private static readonly string root = Environment.GetEnvironmentVariable("NETPROBE_ROOT") ?? "";
     private const int http_port = 39510, https_port = 39511, ws_port = 39512;
     private static int passed, failed;
@@ -91,7 +92,7 @@ static partial class Program
             PooledConnectionLifetime = TimeSpan.FromMinutes(1),
         };
         var client = new HttpClient(handler) { Timeout = timeout ?? TimeSpan.FromSeconds(30) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("osu-HBLauncher-net-probe/1.0");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("osu-kaihen-net-probe/1.0");
         return client;
     }
 
@@ -140,7 +141,7 @@ static partial class Program
             return Task.FromResult($"{text.Length} bytes, local {s.LocalEndPoint}");
         });
 
-        Stage(2, "DNS (nn resolver via getaddrinfo shim)", 30, () =>
+        Stage(2, "DNS (console resolver via the island's getaddrinfo)", 30, () =>
         {
             var osu = Dns.GetHostAddresses("osu.ppy.sh");
             var numeric = Dns.GetHostAddresses(host);
@@ -192,7 +193,7 @@ static partial class Program
             return $"{sizes.Sum()} bytes in {sw.ElapsedMilliseconds} ms";
         });
 
-        Stage(7, "downloads: 20 MiB HTTP to /tmp on the file server, 4 MiB HTTPS", 240, async () =>
+        Stage(7, "downloads: 20 MiB HTTP to /tmp on the SD card, 4 MiB HTTPS", 240, async () =>
         {
             using var c = ProbeClient(TimeSpan.FromMinutes(3));
             var sw = Stopwatch.StartNew();
@@ -207,7 +208,7 @@ static partial class Program
                 got = await VerifyPattern(s, 4194304);
             double https = got / 1048576.0 / sw.Elapsed.TotalSeconds;
             File.Delete(root + "/tmp/net-probe.bin");
-            return $"HTTP {http:F1} MiB/s (written to the file server), HTTPS {https:F1} MiB/s";
+            return $"HTTP {http:F1} MiB/s (written to the SD card), HTTPS {https:F1} MiB/s";
         });
 
         Stage(8, "WebSocket echo (ClientWebSocket, SignalR's transport)", 60, async () =>

@@ -18,7 +18,6 @@ TC=${LX_MUSL_TOOLCHAIN:-$HOME/osu-HBLauncher/toolchain-src/toolchain}
 CC="$TC/bin/aarch64-linux-musl-gcc"
 OBJCOPY="$TC/bin/aarch64-linux-musl-objcopy"
 NM="$TC/bin/aarch64-linux-musl-nm"
-OBJDUMP="$TC/bin/aarch64-linux-musl-objdump"
 [ -x "$CC" ] || { echo "make-island: no musl toolchain at $TC" >&2; exit 1; }
 
 OUT=$1
@@ -29,14 +28,38 @@ trap 'rm -rf "$WORK"' EXIT
 CFLAGS="-O2 -g -Wall -Wextra -Werror -fPIE -ffunction-sections -fdata-sections -I$ROOT/lx/include"
 "$CC" $CFLAGS -c "$ROOT/lx/island/lx_island.c" -o "$WORK/lx_island.o"
 "$CC" -g -c "$ROOT/lx/island/lx_island_asm.S" -o "$WORK/lx_island_asm.o"
+"$CC" $CFLAGS -c "$ROOT/lx/island/lx_net.c" -o "$WORK/lx_net.o"
 
 LIBC=$("$CC" -print-file-name=libc.a)
 LIBGCC=$("$CC" -print-libgcc-file-name)
 LIBGCC_EH=$("$CC" -print-file-name=libgcc_eh.a)
 
-"$CC" -nostdlib -nostartfiles -r -Wl,-T,"$ROOT/lx/island/island-r.ld" -o "$WORK/full.o" \
-    "$WORK/lx_island.o" "$WORK/lx_island_asm.o" "$@" \
-    -Wl,--start-group "$LIBC" "$LIBGCC" "$LIBGCC_EH" -Wl,--end-group
+island_link() { # extra linker flags...
+    "$CC" -nostdlib -nostartfiles -r -Wl,-T,"$ROOT/lx/island/island-r.ld" -o "$WORK/full.o" \
+        -Wl,--wrap=getaddrinfo -Wl,--wrap=freeaddrinfo "$@" \
+        "$WORK/lx_island.o" "$WORK/lx_island_asm.o" "$WORK/lx_net.o" $INPUTS \
+        -Wl,--start-group "$LIBC" "$LIBGCC" "$LIBGCC_EH" -Wl,--end-group
+}
+weak_undefined() {
+    "$NM" -u "$WORK/full.o" | awk '$1 == "w" && $2 != "_DYNAMIC" {print $2}'
+}
+
+# Weak references: a weak reference doesn't pull an archive member in (OpenSSL's weak getentropy stayed undefined
+# although musl has it), and one left undefined would bind to a host (newlib) symbol of that name in the final link.
+# So: link again with -u for each, letting the archives supply what they have; whatever is still missing is pinned
+# to 0 inside the island, which is what an unresolved weak reference means.
+INPUTS=""
+for a in "$@"; do INPUTS="$INPUTS $(printf '%s' "$a" | sed 's/ /\\ /g')"; done
+island_link
+WEAK=$(weak_undefined)
+if [ -n "$WEAK" ]; then
+    island_link $(for w in $WEAK; do printf ' -Wl,-u,%s' "$w"; done)
+    WEAK=$(weak_undefined)
+    if [ -n "$WEAK" ]; then
+        echo "make-island: weak references left at 0: $(echo $WEAK)"
+        island_link $(for w in $WEAK; do printf ' -Wl,--defsym,%s=0' "$w"; done)
+    fi
+fi
 
 # Undefined symbols that no relocation uses are debris (the .NET runtime's WriteBarriers.S.o lists its macro
 # parameters "dst" and "val" that way); drop them so they can't meet anything in the final link.
@@ -68,10 +91,8 @@ if [ "$GLOBALS" != "lx_island_main" ]; then
 fi
 # Allowed: musl's signal-return trampoline __restore(_rt) (rt_sigreturn). sigaction hands it to the "kernel" as the
 # restorer, and the host's sigaction never delivers a signal, so it never runs.
-SVC=$("$OBJDUMP" -d "$OUT" | awk '/^[0-9a-f]+ <.*>:$/ {fn=$2} /\tsvc\t/ {print fn}' | sort -u |
-      grep -v -x -E '<__restore>:|<__restore_rt>:' || true)
-if [ -n "$SVC" ]; then
-    echo "make-island: raw svc instructions in the island (functions shown):" >&2
+if ! SVC=$(python3 "$ROOT/tools/svc-scan.py" "$OUT" __restore __restore_rt); then
+    echo "make-island: raw svc instructions in the island:" >&2
     echo "$SVC" >&2
     exit 1
 fi

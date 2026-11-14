@@ -76,3 +76,14 @@ pipeline, 5 300 frames of a spinning triangle (visible on screen), 7a-7g GPU rea
 draws, 192 MiB of ballast textures), 8a-8g osu-framework-like draws (depth, UBOs, texture sets, scissor, blending:
 each line says ok or the wrong pixel), 6 dispose. Ends with `RESULT: all stages passed` and the host's Vulkan objects
 back at `0 open`. **Passed 2026-11-13** (all stages, 60 fps; after the host fixed the window at 1920x1080).
+
+## Test 5: net-probe (Phase 3 step 3: sockets, epoll, DNS, TLS)
+
+On the PC: `python3 tools/net-probe-server.py --host 192.168.1.206` (creates the test CA on first start; keep it
+running). Build: `sh probes/net-probe/build.sh` (the CA and the CA bundle go into the .nro's romfs: nothing to copy to
+the SD card). Send `probes/net-probe/build/net-probe.nro` with nxlink.
+
+Stages: 0 CSPRNG + clock, 1 blocking TCP, 2 DNS (console resolver), 3 async socket 4 MiB (epoll), 4 HTTP,
+5 HTTPS with chain build, 6 10 concurrent HTTPS, 7 downloads (20 MiB HTTP to the SD card, 4 MiB HTTPS),
+8 WebSocket echo, 9 timeout/cancellation, 10 connection refused, 11 40 sockets at once, 12 one HTTPS GET to osu.ppy.sh
+(the only request to ppy's servers). Ends with `done: N passed, M failed`. **Passed 2026-11-13** (13/13).

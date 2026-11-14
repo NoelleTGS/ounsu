@@ -174,3 +174,24 @@ draws (depth LessEqual, UBO set 0 + texture set 1, scissor, alpha blend) with th
   Watch whether hbmenu ever lacks its GPU after a run.
 - For later (libounce native_window.h): `nwindowSetModeDimensions` (per-mode size, e.g. 4K docked) and
   `nwindowSetFrameRates` (120 Hz on the handheld screen, VRR): osu! at 120 fps handheld.
+
+## 2026-11-13: Phase 3 step 3 passed: networking (Test 5)
+
+`probes/net-probe` on hardware: **13 of 13** after one fix. DNS through the console's resolver (osu.ppy.sh -> 2
+addresses, 74 ms), blocking and async TCP (epoll, 53 MiB/s), HTTP, HTTPS with a chain build against the probe CA,
+10 concurrent HTTPS requests, 20 MiB HTTP to the SD card (10.4 MiB/s, the card is the limit) and 4 MiB HTTPS
+(50 MiB/s), WebSocket echo, cancellation, connection refused, 40 sockets at once, and one HTTPS GET to osu.ppy.sh
+verified against the CA bundle.
+
+- `lx/host/lx_net.c`: libnx BSD sockets translated to Linux (sockaddr without sin_len, SOL_SOCKET 1, SO_/MSG_
+  values, errno); every host socket non-blocking with blocking calls and SO_RCVTIMEO/SNDTIMEO emulated by 10 ms polls;
+  epoll emulated with armed bits (any receive/send re-arms); DNS via newlib's getaddrinfo (sfdnsres). Island side:
+  `lx/island/lx_net.c` (getaddrinfo/freeaddrinfo wraps, from hbxl_net.c). ABI version 3 (`resolve_ipv4`).
+- **The one bug:** closing an fd must drop it from epoll sets (Linux does). .NET reuses fd numbers at once, so the next
+  socket's EPOLL_CTL_ADD hit the stale entry: EEXIST, which surfaced as "Unknown socket error" on connect. Entries
+  now remember the open file's generation number (not its address: malloc reuses those too).
+- romfs: the host mounts the .nro's romfs; read-only lookups that miss on the SD card fall back to it (the probe carries
+  its CA and the CA bundle that way). `ROMFS=dir` in the host Makefile.
+- make-island: weak references are resolved inside the island (relink with -u; still missing -> 0). OpenSSL's weak
+  getentropy would otherwise have bound to newlib's. The svc check reads the object directly (`tools/svc-scan.py`);
+  objdump -d took over 8 minutes on an island with OpenSSL.
