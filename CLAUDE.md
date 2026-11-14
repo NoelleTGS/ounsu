@@ -50,7 +50,7 @@ default**; nxlink is only a development log channel. Never design features aroun
     always set); a Joy-Con on a surface (Nmouse flag bit 1) is a mouse whose stick only scrolls, otherwise a
     controller. Setting Off/Left/Right/Both + sensitivity.
     1. Consider OptimizationPreference=Speed (the Size setting was for hbxl's 240 MiB SDK heap); the docked/4K window
-       and 120 Hz handheld (libounce nwindowSetModeDimensions / nwindowSetFrameRates); play-test a map.
+       and 120 Hz handheld (libounce nwindowSetModeDimensions / nwindowSetFrameRates). Maps play fine (user, 2026-11-14).
     2. Later (user's wish): USB drawing tablets.
   - **Workflow:** `sh console/osu-game/build.sh` (~15 min, ILC) or `LX_SKIP_PUBLISH=1 sh console/osu-game/build.sh`
     (relink, ~70 s). Claude sends builds itself so the log can be read: `nxlink -s -a 192.168.1.177 <nro> >
