@@ -338,3 +338,36 @@ empty and osu! never got past its database. What the runs found, in order:
   - Gameplay allocates ~4 MB/s, a lot for osu!: probably port glue per frame (input, display, audio). Less allocation
     would shrink the post-map pause.
   - Song select / loading GCs of 100-300 ms are unchanged (same slow GC work, no session there).
+
+## 2026-11-14: USB drawing tablet, first look (probes/usb-probe, runs usb-probe-1..8)
+
+Tablet: Wacom CTL-671 (056a:0301) with a custom high-polling-rate firmware. OpenTabletDriver (`~/OpenTabletDriver`,
+`Configurations/Wacom/CTL-671.json`): feature report `02 02` switches it to Wacom mode, then 10-byte Intuos reports
+(id 0x02, X/Y u16 at 2/4, pressure u16 at 6; 21600x13500).
+
+- **`usb:hs` is closed to us.** sm (through kaiHEN's sm proxy, which forwards GetServiceHandle over FS's session) gives
+  a `usb:hs` session, the domain conversion works, and then **every request gets 0xF601 (kernel ConnectionClosed)**:
+  BindClientProcess with the pseudo handle or the real process handle from hbloader, with or without a domain, unbound
+  queries, and over TIPC as well (BindClientProcess, ids 0-31 without arguments). The server closes the session
+  whatever arrives, so it is neither the protocol nor the command table. Likely the usb sysmodule rejects this client
+  (process/policy check), or the server behind the name is not serving.
+- `smGetService("usb:hs:a")` **blocks forever** (sm waits for unregistered names): that name doesn't exist on this
+  firmware. Never ask sm for a name that may not exist without a timeout plan.
+- **hid does not turn the tablet into a mouse:** `hidGetMouseStates` showed a connected mouse (attr=2) but no movement
+  while the pen moved.
+- Run 1 crashed the whole console (needed ns2jb again); its nxlink output was lost. Unknown which call; later runs
+  with the same usbHsInitialize did not crash.
+- Probe gotchas: `nxlinkStdio()` needs `socketInitializeDefault()` first; run nxlink with `stdbuf -oL` when writing to
+  a file; libounce has no text console, so the probe prompts (A/B) only show in the nxlink log.
+- **Correction (run 7): 0xF601 is not a permission refusal.** Control on `set`: an unknown id (999) or cmd 1 without
+  its buffer also gets 0xF601. Switch 2 sf servers close the session on any request whose id or layout they don't
+  accept. So `usb:hs` is reachable (sm hands out the real session: kaiHEN's sm proxy just forwards GetServiceHandle,
+  `hen/source/sm_proxy.cpp`, and the server answers ConvertToDomain), but its Switch 2 command ids/layouts differ
+  from libnx's Switch 1 wrapper. Ids 0-63 with pid, with pid + process handle, and with pid + u64 pid: all closed.
+  libounce's Switch 2 patches show the same pattern elsewhere (audout manager from `aud:u`, nv from GSV).
+- **Run 8: a blind layout scan crashed the whole console.** Raw CMIF requests over request type x data size (0-0x30)
+  x pid x copy handle x buffer set, a fresh session per try, id 0 first. The `set` control request passed (svc 0,
+  cmif 0); the console died before id 0's 728 tries finished (no per-id summary line). Run 1's crash may have the same
+  cause. **Never scan usb:hs blindly again**: every crash costs a console reboot and ns2jb (~20 % per try).
+- **Status: parked.** The way forward is the real Switch 2 `usb:hs` interface: from the usb sysmodule's code
+  (firmware RE) or from whoever maps Switch 2 services for libounce, not more probing on the console.

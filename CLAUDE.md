@@ -54,7 +54,11 @@ default**; nxlink is only a development log channel. Never design features aroun
     pumps `appletMainLoop` (in `display_get`); HOME menu / exit request behaviour not yet tested.
     Also done 2026-11-14: OptimizationPreference=Speed, and **no GCs during gameplay** (`GameplayGcSession.cs`:
     no-GC region per map, heap limit 3 GiB; FEASIBILITY.md has the leftover pauses outside gameplay, parked by the user).
-    1. Later (user's wish): USB drawing tablets.
+    1. Later (user's wish): USB drawing tablets. **First look 2026-11-14 (`probes/usb-probe`): parked.** `usb:hs` is
+       reachable but its Switch 2 command layouts differ from libnx's (Switch 2 servers close the session, 0xF601,
+       on any request they don't accept; `set` does the same). A blind layout scan crashed the console: don't repeat
+       it. hid doesn't see the tablet as a mouse; `usb:hs:a` doesn't exist (sm blocks on it). Needs the real
+       interface (firmware RE). FEASIBILITY.md 2026-11-14 has the details.
     2. Not important to the user yet: HOME menu / sleep / close-from-HOME handling.
   - **Workflow:** `sh console/osu-game/build.sh` (~15 min, ILC) or `LX_SKIP_PUBLISH=1 sh console/osu-game/build.sh`
     (relink, ~70 s). Claude sends builds itself so the log can be read: `nxlink -s -a 192.168.1.177 <nro> >
