@@ -41,6 +41,8 @@ struct fd {
     int host_fd;      /* FD_FILE: newlib fd; FD_SOCKET: libnx socket (always non-blocking on the host side) */
     DIR *dir;         /* FD_DIR */
     long dir_pos;     /* FD_DIR: entries returned so far */
+    char *dir_stash;  /* FD_DIR: an entry that didn't fit the last getdents buffer (name; malloc'd), returned next */
+    unsigned char dir_stash_type;
     char *path;       /* FD_FILE/FD_DIR: host path (for fstat on directories, getdents, relative lookups) */
     char *lx_path;    /* the island's path, for *at() relative to this fd */
     int flags;        /* Linux status flags (O_APPEND, O_NONBLOCK) */

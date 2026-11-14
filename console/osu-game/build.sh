@@ -60,6 +60,8 @@ SDL_AUDIO_DRIVER=dummy
 OSU_HBXL_NO_AUDIO=1
 OSU_RESOURCES_DIR=/osu-resources
 EOF
+# LX_ENV_EXTRA: extra lines for a test build (e.g. LX_ENV_EXTRA="LX_TRACE=1").
+if [ -n "${LX_ENV_EXTRA:-}" ]; then printf '%s\n' $LX_ENV_EXTRA >> obj/romfs/lx-env; fi
 make -s -C "$ROOT/lx/host" ISLAND="$HERE/build/island.o" APP=osu APP_TITLE="osu!" OUT="$HERE/build" VULKAN=1 \
     ROMFS="$HERE/obj/romfs"
 ls -la "$HERE/build/osu.nro"

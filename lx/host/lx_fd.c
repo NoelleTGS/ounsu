@@ -265,13 +265,18 @@ static void pipe_release(struct pipe_buf *p, int writer) {
    libraries rely on it (Realm opens its lock file twice). So the host keeps ONE card handle per file, shared by every
    island descriptor of that file, each with its own position: every read and write is a positioned transfer on the
    shared handle, under its lock. A file first opened read-only and later for writing gets its handle reopened
-   read-write. */
+   read-write.
+
+   The same file system also fails stat (ENOENT) and unlink (EIO) on a file that is open. So stat and open look for a
+   shared handle first, and unlinking an open file only marks its handle: the path then reads as gone, and the card
+   file is deleted when the last descriptor closes (Linux semantics; osu! deletes a download it still has open). */
 
 struct hfile {
     char *path;
     int fd;
     int refs;
     int writable;
+    int unlinked;
     Mutex lock;
     struct hfile *next;
 };
@@ -286,7 +291,16 @@ static struct hfile *hfile_open(const char *path, int nf, long *err) {
     struct hfile *h;
     for (h = g_hfiles; h && strcmp(h->path, path); h = h->next) {
     }
+    if (h && h->unlinked && !(nf & O_CREAT)) {
+        mutexUnlock(&g_hfiles_lock);
+        *err = -2; /* ENOENT */
+        return NULL;
+    }
     if (h) {
+        if (h->unlinked) {
+            lx_logf("lx: %s created again while its unlinked predecessor is open: sharing it", path);
+            h->unlinked = 0;
+        }
         if ((nf & O_CREAT) && (nf & O_EXCL)) {
             mutexUnlock(&g_hfiles_lock);
             *err = -17; /* EEXIST */
@@ -342,10 +356,41 @@ static void hfile_release(struct hfile *h) {
             }
         }
         close(h->fd);
+        if (h->unlinked && unlink(h->path) != 0) lx_logf("lx: deferred unlink of %s failed (%d)", h->path, errno);
         free(h->path);
         free(h);
     }
     mutexUnlock(&g_hfiles_lock);
+}
+
+/* stat through an open shared handle. Returns 1 (found, *r = result), or 0 when the file isn't open. */
+static int hfile_stat_path(const char *path, struct stat *st, long *r) {
+    mutexLock(&g_hfiles_lock);
+    struct hfile *h;
+    for (h = g_hfiles; h && strcmp(h->path, path); h = h->next) {
+    }
+    if (h) {
+        if (h->unlinked) {
+            *r = -2;
+        } else {
+            mutexLock(&h->lock);
+            *r = fstat(h->fd, st) == 0 ? 0 : lx_errno(errno);
+            mutexUnlock(&h->lock);
+        }
+    }
+    mutexUnlock(&g_hfiles_lock);
+    return h != NULL;
+}
+
+/* unlink of a file that may be open: returns 1 when it was open (*r = result), 0 otherwise. */
+static int hfile_unlink_path(const char *path, long *r) {
+    mutexLock(&g_hfiles_lock);
+    struct hfile *h;
+    for (h = g_hfiles; h && strcmp(h->path, path); h = h->next) {
+    }
+    if (h) *r = h->unlinked ? -2 : (h->unlinked = 1, 0);
+    mutexUnlock(&g_hfiles_lock);
+    return h != NULL;
 }
 
 static struct hfile *hfile_find(const char *path) {
@@ -400,6 +445,7 @@ void fd_free(struct fd *f) {
     if (f->kind == FD_FILE && f->hf) hfile_release(f->hf);
     f->hf = NULL;
     if (f->kind == FD_DIR && f->dir) closedir(f->dir);
+    if (f->kind == FD_DIR) free(f->dir_stash);
     if (f->kind == FD_PIPE_R || f->kind == FD_PIPE_W) pipe_release(f->pipe, f->kind == FD_PIPE_W);
     if (f->kind == FD_SOCKET && f->host_fd >= 0) close(f->host_fd);
     if (f->kind == FD_EPOLL) lx_epoll_free(f->epoll);
@@ -684,8 +730,9 @@ long lx_openat(int dirfd, const char *path, int flags, int mode) {
     } else {
         struct stat st;
         host_path(lp, hp, sizeof hp);
-        int exists = stat(hp, &st) == 0;
-        if (!exists && (flags & L_O_ACCMODE) == 0 && !(flags & L_O_CREAT) && romfs_path(lp, hp, sizeof hp))
+        long hr = 0;
+        int exists = hfile_stat_path(hp, &st, &hr) ? hr == 0 : stat(hp, &st) == 0;
+        if (!exists && !hr && (flags & L_O_ACCMODE) == 0 && !(flags & L_O_CREAT) && romfs_path(lp, hp, sizeof hp))
             exists = stat(hp, &st) == 0;
         if (exists && S_ISDIR(st.st_mode)) {
             if ((flags & L_O_ACCMODE) != 0) return -21; /* EISDIR */
@@ -854,6 +901,8 @@ long lx_lseek(int fd, long off, int whence) {
         if (off == 0 && whence == 0) {
             rewinddir(f->dir);
             f->dir_pos = 0;
+            free(f->dir_stash);
+            f->dir_stash = NULL;
             return 0;
         }
         return -LX_EINVAL;
@@ -928,7 +977,10 @@ long lx_fstatat(int dirfd, const char *path, void *out, int flags) {
         return -LX_ENOENT;
     }
     host_path(lp, hp, sizeof hp);
-    if (stat(hp, &st) != 0) {
+    long hr;
+    if (hfile_stat_path(hp, &st, &hr)) {
+        if (hr) return hr;
+    } else if (stat(hp, &st) != 0) {
         int e = errno;
         if (!romfs_path(lp, hp, sizeof hp) || stat(hp, &st) != 0) return lx_errno(e);
     }
@@ -947,29 +999,46 @@ long lx_getdents64(int fd, void *buf, size_t cap) {
     if (!f) return -LX_EBADF;
     if (f->kind != FD_DIR) return -20; /* ENOTDIR */
     size_t used = 0;
+    /* An entry that doesn't fit is kept in f->dir_stash for the next call: newlib's telldir/seekdir don't work on
+       libnx's DIR (the first directory listing over one buffer killed the process: osu!'s font cache). */
     for (;;) {
-        long pos = telldir(f->dir);
-        struct dirent *e = readdir(f->dir);
-        if (!e) break;
-        size_t name_len = strlen(e->d_name);
+        const char *name;
+        unsigned char type;
+        if (f->dir_stash) {
+            name = f->dir_stash;
+            type = f->dir_stash_type;
+        } else {
+            struct dirent *e = readdir(f->dir);
+            if (!e) break;
+            name = e->d_name;
+            type = e->d_type == DT_DIR ? 4 : e->d_type == DT_REG ? 8 : 0;
+        }
+        size_t name_len = strlen(name);
         size_t reclen = (19 + name_len + 1 + 7) & ~(size_t)7;
         if (used + reclen > cap) {
-            seekdir(f->dir, pos);
+            if (!f->dir_stash) {
+                f->dir_stash = strdup(name);
+                f->dir_stash_type = type;
+            }
             if (!used) return -LX_EINVAL;
             break;
         }
         uint8_t *rec = (uint8_t *)buf + used;
         char child[1300];
-        snprintf(child, sizeof child, "%s/%s", f->path, e->d_name);
+        snprintf(child, sizeof child, "%s/%s", f->path, name);
         uint64_t ino = path_inode(child);
         int64_t off = ++f->dir_pos;
         uint16_t rl = (uint16_t)reclen;
         memcpy(rec, &ino, 8);
         memcpy(rec + 8, &off, 8);
         memcpy(rec + 16, &rl, 2);
-        rec[18] = e->d_type == DT_DIR ? 4 : e->d_type == DT_REG ? 8 : 0;
-        memcpy(rec + 19, e->d_name, name_len + 1);
+        rec[18] = type;
+        memcpy(rec + 19, name, name_len + 1);
         used += reclen;
+        if (f->dir_stash) {
+            free(f->dir_stash);
+            f->dir_stash = NULL;
+        }
     }
     return (long)used;
 }
@@ -988,6 +1057,7 @@ long lx_unlinkat(int dirfd, const char *path, int flags) {
     long r = lx_resolve(dirfd, path, lp, sizeof lp);
     if (r) return r;
     host_path(lp, hp, sizeof hp);
+    if (!(flags & L_AT_REMOVEDIR) && hfile_unlink_path(hp, &r)) return r;
     r = (flags & L_AT_REMOVEDIR) ? rmdir(hp) : unlink(hp);
     return r == 0 ? 0 : lx_errno(errno);
 }

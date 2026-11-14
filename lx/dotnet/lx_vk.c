@@ -173,8 +173,64 @@ static void *device_fn(const char *name) {
 
 /* Swapchain recreation does not work on the console's window: a second swapchain on the same surface failed in
    gfx-probe whether the old one was destroyed after (acquire failed) or before (VK_ERROR_SURFACE_LOST_KHR). The host
-   sizes the window to 1920x1080 before anything is made, so Veldrid's swapchain matches it and isn't recreated for
-   being VK_SUBOPTIMAL_KHR. If osu! needs recreation later, the fix is to keep the one swapchain (HBLauncher did). */
+   sizes the window to 1920x1080 before anything is made, but osu-framework still recreates its swapchain once at
+   start. So a recreation with the same size and format hands back the old swapchain (HBLauncher did the same), and
+   the destroy of the "old" one that follows is swallowed. Anything else goes through (and is logged).
+   Veldrid acquires an image right after creating a swapchain, so at a reuse one image is still acquired and not
+   presented: the next acquire hands that image back (signalling its semaphore and fence with an empty submit)
+   instead of acquiring another one, which would run the swapchain out of images. */
+static VkSwapchainKHR g_sc;
+static int64_t g_outstanding = -1; /* acquired, not yet presented */
+static int64_t g_pending = -1;     /* to hand back on the next acquire */
+static VkQueue g_queue;
+static VkExtent2D g_sc_extent;
+static VkFormat g_sc_format;
+static int g_sc_swallow;
+
+static VKAPI_ATTR VkResult VKAPI_CALL lx_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *ci,
+                                                            const VkAllocationCallbacks *alloc, VkSwapchainKHR *out) {
+    static PFN_vkCreateSwapchainKHR real;
+    if (!real) real = (PFN_vkCreateSwapchainKHR)device_fn("vkCreateSwapchainKHR");
+    static int keep = -1;
+    if (keep < 0) {
+        const char *e = getenv("LX_VK_KEEP_SWAPCHAIN");
+        keep = !(e && e[0] == '0');
+    }
+    if (keep && ci->oldSwapchain != VK_NULL_HANDLE && ci->oldSwapchain == g_sc &&
+        ci->imageExtent.width == g_sc_extent.width && ci->imageExtent.height == g_sc_extent.height &&
+        ci->imageFormat == g_sc_format) {
+        g_sc_swallow++;
+        g_pending = g_outstanding;
+        vlog("lx-vk: swapchain recreation at %ux%u: keeping the one swapchain", ci->imageExtent.width,
+             ci->imageExtent.height);
+        *out = g_sc;
+        return VK_SUCCESS;
+    }
+    if (ci->oldSwapchain != VK_NULL_HANDLE)
+        vlog("lx-vk: swapchain recreation %ux%u -> %ux%u (format %d -> %d): passed through", g_sc_extent.width,
+             g_sc_extent.height, ci->imageExtent.width, ci->imageExtent.height, (int)g_sc_format, (int)ci->imageFormat);
+    VkResult r = real(device, ci, alloc, out);
+    if (r == VK_SUCCESS) {
+        g_sc = *out;
+        g_sc_extent = ci->imageExtent;
+        g_sc_format = ci->imageFormat;
+        g_sc_swallow = 0;
+        g_outstanding = g_pending = -1;
+    }
+    return r;
+}
+
+static VKAPI_ATTR void VKAPI_CALL lx_DestroySwapchainKHR(VkDevice device, VkSwapchainKHR sc,
+                                                         const VkAllocationCallbacks *alloc) {
+    static PFN_vkDestroySwapchainKHR real;
+    if (!real) real = (PFN_vkDestroySwapchainKHR)device_fn("vkDestroySwapchainKHR");
+    if (sc != VK_NULL_HANDLE && sc == g_sc && g_sc_swallow > 0) {
+        g_sc_swallow--;
+        return;
+    }
+    if (sc == g_sc) g_sc = VK_NULL_HANDLE;
+    real(device, sc, alloc);
+}
 
 /* Failed acquires and presents are logged (the first 20) with their result. */
 static int g_present_errors;
@@ -183,7 +239,20 @@ static VKAPI_ATTR VkResult VKAPI_CALL lx_AcquireNextImageKHR(VkDevice device, Vk
                                                              VkSemaphore sem, VkFence fence, uint32_t *index) {
     static PFN_vkAcquireNextImageKHR real;
     if (!real) real = (PFN_vkAcquireNextImageKHR)device_fn("vkAcquireNextImageKHR");
+    if (sc == g_sc && g_pending >= 0 && g_queue) {
+        static PFN_vkQueueSubmit submit;
+        if (!submit) submit = (PFN_vkQueueSubmit)device_fn("vkQueueSubmit");
+        VkSubmitInfo si = { VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 0, NULL, sem ? 1u : 0u, sem ? &sem : NULL };
+        VkResult sr = submit(g_queue, 1, &si, fence);
+        vlog("lx-vk: vkAcquireNextImageKHR -> image %u again (acquired before the reuse), signal: %d",
+             (unsigned)g_pending, (int)sr);
+        if (sr != VK_SUCCESS) return sr;
+        *index = (uint32_t)g_pending;
+        g_pending = -1;
+        return VK_SUCCESS;
+    }
     VkResult r = real(device, sc, timeout, sem, fence, index);
+    if ((r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) && sc == g_sc) g_outstanding = *index;
     if (r != VK_SUCCESS && g_present_errors++ < 20) vlog("lx-vk: vkAcquireNextImageKHR -> %d", (int)r);
     return r;
 }
@@ -192,8 +261,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL lx_QueuePresentKHR(VkQueue queue, const Vk
     static PFN_vkQueuePresentKHR real;
     if (!real) real = (PFN_vkQueuePresentKHR)device_fn("vkQueuePresentKHR");
     VkResult r = real(queue, info);
+    for (uint32_t k = 0; k < info->swapchainCount; k++)
+        if (info->pSwapchains[k] == g_sc && (int64_t)info->pImageIndices[k] == g_outstanding) g_outstanding = -1;
     if (r != VK_SUCCESS && g_present_errors++ < 20) vlog("lx-vk: vkQueuePresentKHR -> %d", (int)r);
     return r;
+}
+
+static VKAPI_ATTR void VKAPI_CALL lx_GetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue *out) {
+    static PFN_vkGetDeviceQueue real;
+    if (!real) real = (PFN_vkGetDeviceQueue)device_fn("vkGetDeviceQueue");
+    real(device, family, index, out);
+    if (!g_queue) g_queue = *out;
 }
 
 /* VkWaylandSurfaceCreateInfoKHR without the wayland headers. */
@@ -241,7 +319,10 @@ static void *override_for(const char *name) {
         { "vkDestroyDevice", (void *)lx_DestroyDevice },
         { "vkCreateWaylandSurfaceKHR", (void *)lx_CreateWaylandSurfaceKHR },
         { "vkGetPhysicalDeviceWaylandPresentationSupportKHR", (void *)lx_GetPhysicalDeviceWaylandPresentationSupportKHR },
+        { "vkCreateSwapchainKHR", (void *)lx_CreateSwapchainKHR },
+        { "vkDestroySwapchainKHR", (void *)lx_DestroySwapchainKHR },
         { "vkAcquireNextImageKHR", (void *)lx_AcquireNextImageKHR },
+        { "vkGetDeviceQueue", (void *)lx_GetDeviceQueue },
         { "vkQueuePresentKHR", (void *)lx_QueuePresentKHR },
     };
     for (size_t k = 0; k < sizeof table / sizeof table[0]; k++)
