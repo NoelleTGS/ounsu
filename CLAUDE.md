@@ -46,6 +46,9 @@ default**; nxlink is only a development log channel. Never design features aroun
     PREVIOUS build. **Next, in order:**
     Also done 2026-11-14: **audio** (ABI 5, `lx/host/lx_audio.c` + `shim/lx_audio_out.c`: no crackles, almost no
     latency), the pressure-GC downgrade (`shim/lx_gc.c`), and a **clean exit back to hbmenu** (run 14).
+    Joy-Con mouse per side (ABI 6, runs 15-16): the host reads hid Nmouse itself (not PadPointer, whose `active` is
+    always set); a Joy-Con on a surface (Nmouse flag bit 1) is a mouse whose stick only scrolls, otherwise a
+    controller. Setting Off/Left/Right/Both + sensitivity.
     1. Consider OptimizationPreference=Speed (the Size setting was for hbxl's 240 MiB SDK heap); the docked/4K window
        and 120 Hz handheld (libounce nwindowSetModeDimensions / nwindowSetFrameRates); play-test a map.
     2. Later (user's wish): USB drawing tablets.
