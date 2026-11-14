@@ -17,6 +17,7 @@ void lx_logf(const char *format, ...) __attribute__((format(printf, 1, 2)));
 void lx_log_raw(const char *text, size_t len);
 
 /* lx_syscall.c */
+extern int lx_trace;
 long lx_syscall(long n, long a, long b, long c, long d, long e, long f);
 uint64_t lx_monotonic_ns(void);
 
@@ -49,6 +50,7 @@ long lx_mkdirat(int dirfd, const char *path, int mode);
 long lx_unlinkat(int dirfd, const char *path, int flags);
 long lx_renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath);
 long lx_ftruncate(int fd, long len);
+long lx_fallocate(int fd, int mode, long off, long len);
 long lx_fsync(int fd);
 long lx_dup(int fd, int newfd, int flags, int min);
 long lx_fcntl(int fd, int cmd, long arg);

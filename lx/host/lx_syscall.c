@@ -164,8 +164,36 @@ static void unknown_syscall(long n) {
     lx_logf("lx: syscall %ld not implemented (-ENOSYS)", n);
 }
 
+/* LX_TRACE=1 in the island's environment: log every syscall with its arguments and result, except the frequent
+   waiting/clock ones. For finding out what a library does that the host doesn't answer right. */
+int lx_trace;
+
+static long dispatch(long n, long a, long b, long c, long d, long e, long f);
+
+static int trace_quiet(long n) {
+    switch (n) {
+    case 98: case 113: case 124: case 101: case 115: case 22: case 73: case 178: case 63: case 64: case 66:
+        return 1; /* futex, clock_gettime, sched_yield, nanosleep, clock_nanosleep, epoll_pwait, ppoll, gettid,
+                     read/write/writev (the log itself) */
+    }
+    return 0;
+}
+
 long lx_syscall(long n, long a, long b, long c, long d, long e, long f) {
     lx_exit_check();
+    long r = dispatch(n, a, b, c, d, e, f);
+    if (lx_trace && !trace_quiet(n)) {
+        int with_path = n == 56 || n == 79 || n == 48 || n == 439 || n == 34 || n == 35 || n == 78;
+        if (with_path)
+            lx_logf("lx-trace: [%d] %ld(%ld, \"%s\", 0x%lx, 0x%lx) = %ld", lx_gettid(), n, a, b ? (const char *)b : "",
+                    c, d, r);
+        else
+            lx_logf("lx-trace: [%d] %ld(0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx) = %ld", lx_gettid(), n, a, b, c, d, e, r);
+    }
+    return r;
+}
+
+static long dispatch(long n, long a, long b, long c, long d, long e, long f) {
     switch (n) {
     /* files (lx_fd.c) */
     case 56: return lx_openat((int)a, (const char *)b, (int)c, (int)d);                 /* openat */
@@ -190,7 +218,7 @@ long lx_syscall(long n, long a, long b, long c, long d, long e, long f) {
     case 35: return lx_unlinkat((int)a, (const char *)b, (int)c);                        /* unlinkat */
     case 38: case 276: return lx_renameat((int)a, (const char *)b, (int)c, (const char *)d); /* renameat(2) */
     case 46: return lx_ftruncate((int)a, b);                                              /* ftruncate */
-    case 47: return 0;                                                                    /* fallocate */
+    case 47: return lx_fallocate((int)a, (int)b, c, d);                                   /* fallocate */
     case 82: case 83: return lx_fsync((int)a);                                            /* fsync/fdatasync */
     case 23: return lx_dup((int)a, -1, 0, 0);                                             /* dup */
     case 24: return a == b ? -LX_EINVAL : lx_dup((int)a, (int)b, (int)c, 0);              /* dup3 */
@@ -261,6 +289,9 @@ long lx_syscall(long n, long a, long b, long c, long d, long e, long f) {
     case 124: lx_sleep_ns(0); return 0;                                                   /* sched_yield */
     case 123: return sys_sched_getaffinity((size_t)b, (uint8_t *)c);                     /* sched_getaffinity */
     case 122: return 0;                                                                   /* sched_setaffinity */
+    case 120: return 0;                                                   /* sched_getscheduler: SCHED_OTHER */
+    case 121: if (c) *(int *)c = 0; return 0;                             /* sched_getparam */
+    case 26: return -24;                                     /* inotify_init1: EMFILE (no file watching here) */
     case 129: case 130: case 131: return 0;               /* kill/tkill/tgkill: no signals (GC activation off) */
     case 134: case 132: return 0;                                                         /* sigaction/sigaltstack */
     case 135:                                                                             /* rt_sigprocmask */

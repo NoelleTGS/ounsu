@@ -95,3 +95,4 @@ fsroot/osu-resources sdmc:/switch/osu/osu-resources` with ounceshell's FTP serve
 Build: `sh console/osu-game/build.sh` (`LX_SKIP_PUBLISH=1` relinks without recompiling osu!). Send
 `console/osu-game/build/osu.nro` (168 MB) with nxlink. Fresh osu! data (first-run setup), silent audio, input not wired
 yet. The goal of the first runs: get to osu!'s intro and main menu, collect the syscalls/paths that fail.
+Runs 1-4 (2026-11-14): osu! starts and renders at 60 fps (empty screen); Realm fixes in progress (FEASIBILITY.md).

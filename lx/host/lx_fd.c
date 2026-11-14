@@ -259,12 +259,146 @@ static void pipe_release(struct pipe_buf *p, int writer) {
     }
 }
 
+/* ---- shared card handles -----------------------------------------------------------------------------------------
+
+   The console's file system refuses to open a file again while it is open for writing (EIO). Linux allows it and
+   libraries rely on it (Realm opens its lock file twice). So the host keeps ONE card handle per file, shared by every
+   island descriptor of that file, each with its own position: every read and write is a positioned transfer on the
+   shared handle, under its lock. A file first opened read-only and later for writing gets its handle reopened
+   read-write. */
+
+struct hfile {
+    char *path;
+    int fd;
+    int refs;
+    int writable;
+    Mutex lock;
+    struct hfile *next;
+};
+
+static struct hfile *g_hfiles;
+static Mutex g_hfiles_lock;
+
+/* Opens (or joins) the shared handle of path. nf: newlib open flags. Returns the handle or NULL with *err. */
+static struct hfile *hfile_open(const char *path, int nf, long *err) {
+    int want_write = (nf & O_ACCMODE) != O_RDONLY;
+    mutexLock(&g_hfiles_lock);
+    struct hfile *h;
+    for (h = g_hfiles; h && strcmp(h->path, path); h = h->next) {
+    }
+    if (h) {
+        if ((nf & O_CREAT) && (nf & O_EXCL)) {
+            mutexUnlock(&g_hfiles_lock);
+            *err = -17; /* EEXIST */
+            return NULL;
+        }
+        mutexLock(&h->lock);
+        if (want_write && !h->writable) {
+            int n = open(path, O_RDWR);
+            if (n < 0) {
+                *err = lx_errno(errno);
+                mutexUnlock(&h->lock);
+                mutexUnlock(&g_hfiles_lock);
+                return NULL;
+            }
+            close(h->fd);
+            h->fd = n;
+            h->writable = 1;
+        }
+        if (nf & O_TRUNC) ftruncate(h->fd, 0);
+        mutexUnlock(&h->lock);
+        h->refs++;
+        mutexUnlock(&g_hfiles_lock);
+        return h;
+    }
+    /* Writers open read-write, so a later reader or writer can share the handle as it is. */
+    int flags = (want_write ? O_RDWR : O_RDONLY) | (nf & (O_CREAT | O_EXCL | O_TRUNC));
+    int fd = open(path, flags, 0666);
+    if (fd < 0 && want_write && (nf & O_ACCMODE) == O_WRONLY && errno == EACCES) fd = open(path, nf & ~O_APPEND, 0666);
+    if (fd < 0) {
+        *err = lx_errno(errno);
+        mutexUnlock(&g_hfiles_lock);
+        return NULL;
+    }
+    h = calloc(1, sizeof *h);
+    h->path = strdup(path);
+    h->fd = fd;
+    h->refs = 1;
+    h->writable = want_write;
+    mutexInit(&h->lock);
+    h->next = g_hfiles;
+    g_hfiles = h;
+    mutexUnlock(&g_hfiles_lock);
+    return h;
+}
+
+static void hfile_release(struct hfile *h) {
+    mutexLock(&g_hfiles_lock);
+    if (--h->refs == 0) {
+        for (struct hfile **pp = &g_hfiles; *pp; pp = &(*pp)->next) {
+            if (*pp == h) {
+                *pp = h->next;
+                break;
+            }
+        }
+        close(h->fd);
+        free(h->path);
+        free(h);
+    }
+    mutexUnlock(&g_hfiles_lock);
+}
+
+static struct hfile *hfile_find(const char *path) {
+    mutexLock(&g_hfiles_lock);
+    struct hfile *h;
+    for (h = g_hfiles; h && strcmp(h->path, path); h = h->next) {
+    }
+    mutexUnlock(&g_hfiles_lock);
+    return h;
+}
+
+/* A positioned transfer on the shared handle. off < 0: at the end (O_APPEND). Returns bytes or -errno; *at gets the
+   offset used. */
+static long hfile_rw(struct hfile *h, void *buf, size_t len, int64_t off, int is_write, uint64_t *at) {
+    mutexLock(&h->lock);
+    off_t where = off < 0 ? lseek(h->fd, 0, SEEK_END) : lseek(h->fd, off, SEEK_SET);
+    long r;
+    if (where < 0) {
+        r = lx_errno(errno);
+    } else {
+        ssize_t n = is_write ? write(h->fd, buf, len) : read(h->fd, buf, len);
+        r = n < 0 ? lx_errno(errno) : n;
+    }
+    mutexUnlock(&h->lock);
+    if (at) *at = where < 0 ? 0 : (uint64_t)where;
+    return r;
+}
+
+static long hfile_stat(struct hfile *h, struct stat *st) {
+    mutexLock(&h->lock);
+    int r = fstat(h->fd, st);
+    int e = errno;
+    mutexUnlock(&h->lock);
+    return r == 0 ? 0 : lx_errno(e);
+}
+
+static long hfile_truncate(struct hfile *h, uint64_t len) {
+    mutexLock(&h->lock);
+    int r = ftruncate(h->fd, (off_t)len);
+    int e = errno;
+    mutexUnlock(&h->lock);
+    return r == 0 ? 0 : lx_errno(e);
+}
+
 static void shm_detach(struct fd *f);
 
 void fd_free(struct fd *f) {
     if (--f->refs > 0) return;
+    /* Close the host file first: a write-back on detach opens it again, and the console's file system refuses a
+       second write handle to a file that is still open (EIO). */
     if (f->shm) shm_detach(f);
-    if (f->kind == FD_FILE && f->host_fd >= 0) close(f->host_fd);
+    if (f->kind == FD_FILE && f->hf) hfile_release(f->hf);
+    f->hf = NULL;
     if (f->kind == FD_DIR && f->dir) closedir(f->dir);
     if (f->kind == FD_PIPE_R || f->kind == FD_PIPE_W) pipe_release(f->pipe, f->kind == FD_PIPE_W);
     if (f->kind == FD_SOCKET && f->host_fd >= 0) close(f->host_fd);
@@ -318,22 +452,42 @@ static struct shm *shm_for_addr(uintptr_t a) {
     return NULL;
 }
 
-/* Lock held. Writes the buffer back to the file. */
+/* Lock held. Writes the buffer back to the file: through a descriptor the program has open for writing if there is
+   one (the console's file system refuses a second write handle to an open file: EIO, seen with Realm's lock file),
+   else through a new one. */
 static long shm_flush(struct shm *m) {
-    int h = open(m->path, O_WRONLY | O_CREAT, 0666);
-    if (h < 0) {
-        lx_logf("lx: shm write-back of %s failed: open (%d)", m->path, errno);
-        return lx_errno(errno);
+    /* Through the file's shared handle if it is open (made writable if need be), else a handle of our own. */
+    struct hfile *h = hfile_find(m->path);
+    int own = !h;
+    long err = 0;
+    if (own) {
+        h = hfile_open(m->path, O_RDWR | O_CREAT, &err);
+        if (!h) {
+            lx_logf("lx: shm write-back of %s failed: open (%ld)", m->path, err);
+            return err;
+        }
+    } else if (!h->writable) {
+        mutexLock(&h->lock);
+        int n = open(m->path, O_RDWR);
+        if (n >= 0) {
+            close(h->fd);
+            h->fd = n;
+            h->writable = 1;
+        }
+        mutexUnlock(&h->lock);
     }
     uint64_t done = 0;
     while (done < m->size) {
-        ssize_t n = write(h, m->data + done, (size_t)(m->size - done < (8u << 20) ? m->size - done : (8u << 20)));
+        size_t chunk = m->size - done < (8u << 20) ? (size_t)(m->size - done) : (8u << 20);
+        long n = hfile_rw(h, m->data + done, chunk, (int64_t)done, 1, NULL);
         if (n <= 0) break;
         done += (uint64_t)n;
     }
-    ftruncate(h, (off_t)m->size);
-    fsync(h);
-    close(h);
+    hfile_truncate(h, m->size);
+    mutexLock(&h->lock);
+    fsync(h->fd);
+    mutexUnlock(&h->lock);
+    if (own) hfile_release(h);
     if (done != m->size) {
         lx_logf("lx: shm write-back of %s failed after %llu of %llu bytes", m->path, (unsigned long long)done,
                 (unsigned long long)m->size);
@@ -348,7 +502,7 @@ static void shm_release_if_unused(struct shm *m) {
     shm_flush(m);
     for (int i = 0; i < MAX_SHM; i++)
         if (g_shm[i] == m) g_shm[i] = NULL;
-    lx_logf("lx: shm released %s (%llu KiB)", m->path, (unsigned long long)(m->size >> 10));
+    lx_logf("lx: shm released %s (%llu bytes)", m->path, (unsigned long long)m->size);
     free(m->data);
     free(m->path);
     free(m);
@@ -365,9 +519,7 @@ static void shm_detach(struct fd *f) {
 /* Lock held: makes f read and write through m. */
 static void shm_attach(struct fd *f, struct shm *m) {
     if (f->shm) return;
-    off_t at = lseek(f->host_fd, 0, SEEK_CUR);
-    f->pos = at > 0 ? (uint64_t)at : 0;
-    f->shm = m;
+    f->shm = m; /* f->pos is already this descriptor's own position */
     m->refs++;
 }
 
@@ -393,7 +545,7 @@ void *lx_fd_map_shared(int fd, uint64_t len, uint64_t off, long *err) {
     struct shm *m = f->shm ? f->shm : shm_for_path(f->path);
     if (!m) {
         struct stat st;
-        uint64_t size = fstat(f->host_fd, &st) == 0 ? (uint64_t)st.st_size : 0;
+        uint64_t size = hfile_stat(f->hf, &st) == 0 ? (uint64_t)st.st_size : 0;
         uint64_t need = size > off + len ? size : off + len;
         uint64_t cap = (need * 4 + SHM_ROUND - 1) & ~(SHM_ROUND - 1);
         if (cap < SHM_MIN_CAP) cap = SHM_MIN_CAP;
@@ -412,20 +564,22 @@ void *lx_fd_map_shared(int fd, uint64_t len, uint64_t off, long *err) {
         m->path = strdup(f->path);
         m->data = data;
         m->cap = cap;
-        /* Read the file in (the fd's position is left alone). */
-        int h = open(f->path, O_RDONLY);
+        /* Read the file in through its shared handle (a second handle would be refused while the file is open for
+           writing: Realm then saw an empty lock file and retried forever). */
         uint64_t got = 0;
-        if (h >= 0) {
-            while (got < size) {
-                ssize_t n = read(h, data + got, (size_t)(size - got));
-                if (n <= 0) break;
-                got += (uint64_t)n;
-            }
-            close(h);
+        while (got < size) {
+            long n = hfile_rw(f->hf, data + got, (size_t)(size - got), (int64_t)got, 0, NULL);
+            if (n <= 0) break;
+            got += (uint64_t)n;
+        }
+        if (got < size) {
+            lx_logf("lx: shm %s: read %llu of %llu bytes", f->path, (unsigned long long)got, (unsigned long long)size);
+            memset(data + got, 0, (size_t)(size - got));
+            got = size;
         }
         m->size = got;
         g_shm[slot] = m;
-        lx_logf("lx: shm %s: %llu KiB, reserved %llu MiB", m->path, (unsigned long long)(got >> 10),
+        lx_logf("lx: shm %s: %llu bytes, reserved %llu MiB", m->path, (unsigned long long)got,
                 (unsigned long long)(cap >> 20));
         /* Every open descriptor of the file goes through the buffer from now on. */
         mutexLock(&g_fd_lock);
@@ -546,10 +700,12 @@ long lx_openat(int dirfd, const char *path, int flags, int mode) {
             if (flags & L_O_EXCL) nf |= O_EXCL;
             if (flags & L_O_TRUNC) nf |= O_TRUNC;
             if (flags & L_O_APPEND) nf |= O_APPEND;
-            int hfd = open(hp, nf, 0666);
-            if (hfd < 0) return lx_errno(errno);
+            long err = 0;
+            struct hfile *hf = hfile_open(hp, nf, &err);
+            if (!hf) return err;
             f = fd_new(FD_FILE);
-            f->host_fd = hfd;
+            f->hf = hf;
+            f->writable = (flags & L_O_ACCMODE) != 0;
         }
         f->path = strdup(hp);
         if (f->kind == FD_FILE) {
@@ -649,8 +805,9 @@ long lx_read(int fd, void *buf, size_t len) {
     case FD_RANDOM: randomGet(buf, len); return (long)len;
     case FD_FILE: {
         if (f->shm) return shm_rw(f, buf, len, f->pos, 0, 1);
-        ssize_t n = read(f->host_fd, buf, len);
-        return n < 0 ? lx_errno(errno) : n;
+        long n = hfile_rw(f->hf, buf, len, (int64_t)f->pos, 0, NULL);
+        if (n > 0) f->pos += (uint64_t)n;
+        return n;
     }
     case FD_DIR: return -21; /* EISDIR */
     case FD_PIPE_R: return pipe_read(f, buf, len);
@@ -671,8 +828,10 @@ long lx_write(int fd, const void *buf, size_t len) {
     case FD_NULL: case FD_ZERO: case FD_RANDOM: return (long)len;
     case FD_FILE: {
         if (f->shm) return shm_rw(f, (void *)buf, len, f->pos, 1, 1);
-        ssize_t n = write(f->host_fd, buf, len);
-        return n < 0 ? lx_errno(errno) : n;
+        uint64_t at;
+        long n = hfile_rw(f->hf, (void *)buf, len, (f->flags & L_O_APPEND) ? -1 : (int64_t)f->pos, 1, &at);
+        if (n >= 0) f->pos = at + (uint64_t)n;
+        return n;
     }
     case FD_PIPE_W: return pipe_write(f, buf, len);
     case FD_SOCKET: return lx_sock_send(f, buf, len, 0);
@@ -685,13 +844,7 @@ long lx_pread(int fd, void *buf, size_t len, long off, int is_write) {
     if (!f) return -LX_EBADF;
     if (f->kind != FD_FILE) return -LX_ESPIPE;
     if (f->shm) return shm_rw(f, buf, len, (uint64_t)off, is_write, 0);
-    /* newlib has no pread: seek, transfer, seek back (callers that share an fd across threads serialise anyway). */
-    off_t was = lseek(f->host_fd, 0, SEEK_CUR);
-    if (lseek(f->host_fd, off, SEEK_SET) < 0) return lx_errno(errno);
-    ssize_t n = is_write ? write(f->host_fd, buf, len) : read(f->host_fd, buf, len);
-    int e = errno;
-    lseek(f->host_fd, was, SEEK_SET);
-    return n < 0 ? lx_errno(e) : n;
+    return hfile_rw(f->hf, buf, len, off, is_write, NULL);
 }
 
 long lx_lseek(int fd, long off, int whence) {
@@ -714,8 +867,20 @@ long lx_lseek(int fd, long off, int whence) {
         mutexUnlock(&g_shm_lock);
         return to < 0 ? -LX_EINVAL : (long)to;
     }
-    off_t r = lseek(f->host_fd, off, whence);
-    return r < 0 ? lx_errno(errno) : (long)r;
+    int64_t base = 0;
+    if (whence == 1) {
+        base = (int64_t)f->pos;
+    } else if (whence == 2) {
+        struct stat st;
+        long e = hfile_stat(f->hf, &st);
+        if (e) return e;
+        base = st.st_size;
+    } else if (whence != 0) {
+        return -LX_EINVAL;
+    }
+    if (base + off < 0) return -LX_EINVAL;
+    f->pos = (uint64_t)(base + off);
+    return (long)f->pos;
 }
 
 long lx_fstat(int fd, void *out) {
@@ -728,11 +893,13 @@ long lx_fstat(int fd, void *out) {
     case FD_PIPE_R: case FD_PIPE_W: special_stat(0010000 | 0600, (uintptr_t)f->pipe, out); return 0; /* FIFO */
     case FD_SOCKET: special_stat(0140000 | 0777, 100000 + (uint64_t)f->host_fd, out); return 0;
     case FD_EPOLL: special_stat(0600, (uintptr_t)f->epoll, out); return 0;
-    case FD_FILE:
-        if (fstat(f->host_fd, &st) != 0) return lx_errno(errno);
+    case FD_FILE: {
+        long e = hfile_stat(f->hf, &st);
+        if (e) return e;
         to_lx_stat(&st, f->path, out);
         if (f->shm) ((struct lx_stat *)out)->size = (int64_t)f->shm->size;
         return 0;
+    }
     case FD_DIR:
         if (stat(f->path, &st) != 0) return lx_errno(errno);
         to_lx_stat(&st, f->path, out);
@@ -847,7 +1014,28 @@ long lx_ftruncate(int fd, long len) {
         mutexUnlock(&g_shm_lock);
         return r;
     }
-    return ftruncate(f->host_fd, len) == 0 ? 0 : lx_errno(errno);
+    return len < 0 ? -LX_EINVAL : hfile_truncate(f->hf, (uint64_t)len);
+}
+
+/* fallocate (mode 0) / posix_fallocate: make sure the file is at least off + len bytes long. Realm sizes its lock file
+   this way before mapping it; answering success without growing the file made it retry forever (2026-11-14). */
+long lx_fallocate(int fd, int mode, long off, long len) {
+    struct fd *f = fd_get(fd);
+    if (!f || f->kind != FD_FILE) return -LX_EBADF;
+    if (mode != 0) return -95; /* EOPNOTSUPP: no punching holes etc. */
+    if (off < 0 || len <= 0) return -LX_EINVAL;
+    uint64_t end = (uint64_t)off + (uint64_t)len;
+    if (f->shm) {
+        mutexLock(&g_shm_lock);
+        long r = end > f->shm->size ? shm_resize(f->shm, end) : 0;
+        mutexUnlock(&g_shm_lock);
+        return r;
+    }
+    struct stat st;
+    long e = hfile_stat(f->hf, &st);
+    if (e) return e;
+    if ((uint64_t)st.st_size >= end) return 0;
+    return hfile_truncate(f->hf, end);
 }
 
 long lx_fsync(int fd) {
@@ -859,7 +1047,11 @@ long lx_fsync(int fd) {
         mutexUnlock(&g_shm_lock);
         return r;
     }
-    if (f->kind == FD_FILE) fsync(f->host_fd);
+    if (f->kind == FD_FILE) {
+        mutexLock(&f->hf->lock);
+        fsync(f->hf->fd);
+        mutexUnlock(&f->hf->lock);
+    }
     return 0;
 }
 

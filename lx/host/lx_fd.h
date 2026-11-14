@@ -34,6 +34,7 @@ struct pipe_buf {
 };
 
 struct epoll_set; /* lx_net.c */
+struct hfile;     /* lx_fd.c: one shared card handle per open file */
 
 struct fd {
     enum fd_kind kind;
@@ -59,6 +60,8 @@ struct fd {
     /* FD_FILE with a shared mapping (MAP_SHARED): the file's contents live in shm, and this fd reads/writes there */
     struct shm *shm;
     uint64_t pos;
+    int writable;     /* FD_FILE opened O_WRONLY/O_RDWR */
+    struct hfile *hf; /* FD_FILE: the shared card handle (pos is this descriptor's own position) */
 };
 
 struct fd *fd_get(int fd);

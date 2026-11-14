@@ -38,7 +38,27 @@ default**; nxlink is only a development log channel. Never design features aroun
   - **Phase 3 in progress.** Done 2026-11-13: Vulkan from the island (Test 3, 60 fps), Veldrid on OunceVK (Test 4, all
     stages; window fixed at 1920x1080 because swapchain recreation fails on the console's window), networking
     (Test 5, 13/13: sockets, epoll, DNS, OpenSSL TLS). SDL decision: the hbxl SDL3 stays in the island (host-side SDL
-    would call managed code from non-island threads). Next: input/audio entries in `struct lx_host`, then osu-game.
+    would call managed code from non-island threads).
+  - **Phase 4 in progress (2026-11-14): osu! starts** (renderer up, 60 fps draw/update) but the screen is empty and
+    Realm didn't open yet. See FEASIBILITY.md 2026-11-14. **Next session, in order:**
+    1. Send the current build (`console/osu-game/build/osu.nro`, built with the shared card handles, never run) and
+       check that Realm opens. (hbmenu's netloader saves each sent .nro as `sdmc:/switch/osu.nro`; launching that from
+       hbmenu runs the PREVIOUS build.)
+    2. Empty screen: keep the one swapchain in `lx/dotnet/lx_vk.c` when osu-framework recreates it at the same size
+       (a second swapchain on the console's window stops presenting; Test 4 history). Check with the ShadowCast.
+    3. Input: port `console/osu-game/shim/hbxl_input.c` (SDL_PushEvent path) onto new `struct lx_host` entries backed
+       by libnx pad/hid (touch, six-axis, USB keyboard/mouse; try Joy-Con 2 mouse mode). Wrap SDL_PumpEvents again.
+    4. Audio: port `hbxl_audio_out.c` onto libnx audout via a host entry; drop SDL_AUDIO_DRIVER=dummy and
+       OSU_HBXL_NO_AUDIO from the romfs lx-env.
+    5. Port `hbxl_gc_timing.c`'s pressure-GC downgrade (gen2 -> gen1); consider OptimizationPreference=Speed (the
+       Size setting was for hbxl's 240 MiB SDK heap); exit/relaunch back to hbmenu; the docked/4K window and 120 Hz.
+  - **Workflow:** `sh console/osu-game/build.sh` (~15 min, ILC) or `LX_SKIP_PUBLISH=1 sh console/osu-game/build.sh`
+    (relink, ~70 s). Claude sends builds itself so the log can be read: `nxlink -s -a 192.168.1.177 <nro> >
+    logs/<name>.log 2>&1` in the background (the user puts hbmenu in netloader mode with Y), plus a Monitor on the log.
+    `LX_TRACE=1` in `sdmc:/switch/osu/lx-env` (or the romfs lx-env) logs every syscall. Files onto the card:
+    `tools/ftp-upload.py` with ounceshell's FTP server. The native libraries come from `~/osu-HBLauncher/src/native`
+    (musl builds, `LX_NATIVE_BUILDS`), except OpenSSL and FFmpeg (this repo's src/native). On the card:
+    `/switch/osu/osu-resources` (uploaded 2026-11-14), osu! data in `/switch/osu/home/.local/share/osu` (fresh).
     Phase 4: osu-game nro + SD layout + clean exit. Phase 5 (faults →
     managed exceptions) is parked: the loader never gets the exceptions.
 - HBLauncher-only material was left out of this repo on 2026-11-13: bti-probe, vfs-hosttest, the net host tests, the

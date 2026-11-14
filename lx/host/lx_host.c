@@ -172,6 +172,9 @@ int main(int argc, char **argv) {
     lx_fd_use_romfs(romfs);
     lx_logf("lx: island root is %s%s", lx_fd_root(), romfs ? " (+ the .nro's romfs)" : "");
     host.envp = build_env(romfs);
+    for (int i = 0; host.envp[i]; i++)
+        if (!strcmp(host.envp[i], "LX_TRACE=1")) lx_trace = 1;
+    if (lx_trace) lx_logf("lx: syscall trace on (LX_TRACE=1)");
 
     void *stack = aligned_alloc(4096, LX_MAIN_STACK);
     if (!stack) {

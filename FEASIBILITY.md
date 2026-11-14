@@ -195,3 +195,31 @@ verified against the CA bundle.
 - make-island: weak references are resolved inside the island (relink with -u; still missing -> 0). OpenSSL's weak
   getentropy would otherwise have bound to newlib's. The svc check reads the object directly (`tools/svc-scan.py`);
   objdump -d took over 8 minutes on an island with OpenSSL.
+
+## 2026-11-14: osu! starts on kaiHEN (Test 6, runs 1-4)
+
+osu-game links as an island (168 MB .nro) and runs: LinuxGameHost, SDL3 (offscreen), the Vulkan renderer on OunceVK
+(1920x1080 swapchain), **draw and update at 60 fps**, GC quiet (16 MiB heap), delegate thunks in use. The screen stayed
+empty and osu! never got past its database. What the runs found, in order:
+
+1. **Realm's lock file** (`client.realm.lock`): Realm sizes it with posix_fallocate before mapping it. The host answered
+   fallocate with success without growing the file -> Realm saw a 0-byte lock file and retried forever (25 000 log
+   lines). Fixed: `lx_fallocate` really extends the file (or the shared buffer).
+2. **The console's file system refuses to open a file again while it is open for writing (EIO).** Linux allows it. It
+   hit the shm write-back (second handle), the shm read-in (Realm saw an empty lock file again) and finally Realm itself
+   (it opens the lock file twice: "Failed to open file ... client.realm.lock: I/O error", then Realm started a fresh
+   database). Fixed (built, NOT yet run on hardware): **one shared card handle per file** (`struct hfile` in lx_fd.c),
+   reference-counted, every island descriptor with its own position, positioned transfers under the handle's lock, a
+   read-only handle reopened read-write when a writer joins. Shared mappings write back through it.
+3. **osu-framework recreates its swapchain once at start** ("vkCreateSwapchainKHR ... replacing one"). In gfx-probe a
+   second swapchain on the console's window stopped presenting. This is the prime suspect for the empty screen even
+   at 60 fps: next step is to keep the one swapchain in lx_vk.c (HBLauncher did) when a recreation has the same size.
+4. Build-side findings: COMDAT groups must be dissolved in the island link (`--force-group-allocation`: the final link
+   kept OunceVK's copy of C++ typeinfo and dropped the island's); osu!'s relocatable object has >65535 sections (ELF
+   then keeps the counts in section header 0: tools/svc-scan.py and tools/unused-undef.py handle it; `readelf -rW`
+   took 16+ minutes on it and is no longer used); FFmpeg must be position-independent (its NEON assembly has absolute
+   addresses in .text otherwise: tools/build-ffmpeg.sh, output src/native/ffmpeg/build-lx); OpenSSL's weak getentropy
+   and libstdc++'s weak `_ITM_*` are resolved inside the island.
+5. Harmless: MIDI's ALSA lookup fails and is caught; inotify (EMFILE now), sched_getparam/getscheduler answered.
+6. ounceshell's FTP server (port 1337) crashed on `LIST /` (a path argument). `tools/ftp-upload.py` uses only CWD by
+   bare name, CDUP, plain LIST, MKD and STOR; it put osu-resources (127 MiB) on the card at 1.4 MiB/s.
