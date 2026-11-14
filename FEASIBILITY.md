@@ -268,3 +268,13 @@ empty and osu! never got past its database. What the runs found, in order:
   sensors. **hbmenu comes back and launches the next program** (run 14). Still printed: `MESA: warning: GPU
   retirement after the last instance: status 0x102` (harmless so far).
 - Undocking drops the ethernet and with it the nxlink log; the game keeps running.
+- **Joy-Con mouse per side (runs 15-16, user-tested):** with the left Joy-Con as a mouse, its stick moved the cursor
+  and scrolled at once. libounce's PadPointer sets `active` whenever a Joy-Con 2 is attached (it reads every Nmouse
+  handle; disassembled) and merges both sides, so `active` said nothing about a Joy-Con on a table. ABI 6: the host
+  reads hid Nmouse itself, per Joy-Con, and reports left/right separately. **Nmouse flag bit 1 = the sensor tracks a
+  surface** (0x3 on the table, 0x1 lifted; it flickers briefly while sliding). The shim keeps a per-side "mouse mode"
+  (on with tracked movement, held 0.75 s after the last tracked sample, stick push or button): in mouse mode the stick
+  only scrolls and L/ZL or R/ZR only click, otherwise the Joy-Con is an ordinary controller. The Nmouse wheel is not
+  used: one small stick push gave a huge value (volume straight to 0/100%); the stick scrolls at the right stick's
+  rate instead. Settings: Joy-Con mouse Off / Left / Right / Both (default Both) and a sensitivity slider.
+  Side effect fixed: L/ZL/R/ZR no longer lose their hit keys just because Joy-Con 2s are attached.

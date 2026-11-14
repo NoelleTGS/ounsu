@@ -35,6 +35,8 @@ public enum Switch2Setting
     GyroInvertY,
     UsbKeyboardMouse,
     MouseSpeed,
+    JoyConMouse,
+    JoyConMouseSpeed,
     AudioPeriod,
     AudioBuffers,
     LogGarbageCollections,
@@ -46,6 +48,9 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
 {
     /// <summary>Gyro buttons in the order of hbxl_input_set_gyro's index (shim/hbxl_input.c).</summary>
     public static readonly string[] GYRO_BUTTONS = { "Off", "B", "L", "R", "ZL", "ZR", "L3", "R3" };
+
+    /// <summary>Joy-Con mouse choices; the index is hbxl_input_set_joymouse's side mask (bit 0 left, bit 1 right).</summary>
+    public static readonly string[] JOYCON_MOUSE = { "Off", "Left Joy-Con only", "Right Joy-Con only", "Both Joy-Cons" };
 
     protected override string Filename => "switch2.ini";
 
@@ -74,6 +79,9 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
         // HBXL_NO_KBMOUSE=1 in hbxl-env still forces both off in the shim (escape hatch), whatever this says.
         SetDefault(Switch2Setting.UsbKeyboardMouse, true);
         SetDefault(Switch2Setting.MouseSpeed, 1f, 0.1f, 10f, 0.1f);
+
+        SetDefault(Switch2Setting.JoyConMouse, "Both Joy-Cons");
+        SetDefault(Switch2Setting.JoyConMouseSpeed, 1f, 0.1f, 10f, 0.1f);
 
         // The import folder on the SD card (ConsoleOsuGame.importFromFolder): checked every N seconds for new files.
         SetDefault(Switch2Setting.ImportAutoCheck, true);
@@ -150,6 +158,15 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
         mouseSpeed.ValueChanged += _ => kbMouse();
         kbMouse();
 
+        var joyMouse = GetBindable<string>(Switch2Setting.JoyConMouse);
+        var joyMouseSpeed = GetBindable<float>(Switch2Setting.JoyConMouseSpeed);
+
+        void joyConMouse() => Switch2Native.SetJoyConMouse(Math.Max(0, Array.IndexOf(JOYCON_MOUSE, joyMouse.Value)), joyMouseSpeed.Value);
+
+        joyMouse.ValueChanged += _ => joyConMouse();
+        joyMouseSpeed.ValueChanged += _ => joyConMouse();
+        joyConMouse();
+
         var period = GetBindable<int>(Switch2Setting.AudioPeriod);
         var buffers = GetBindable<int>(Switch2Setting.AudioBuffers);
 
@@ -162,7 +179,7 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
         GetBindable<bool>(Switch2Setting.LogGarbageCollections).BindValueChanged(e => Switch2Native.SetGcLog(e.NewValue ? gcLogMinPause : -1), true);
 
         // Keeps the bindables (and their handlers) alive as long as the config.
-        applied = new IBindable[] { gyroButton, gyroSpeedX, gyroSpeedY, gyroInvertX, gyroInvertY, usb, mouseSpeed, period, buffers };
+        applied = new IBindable[] { gyroButton, gyroSpeedX, gyroSpeedY, gyroInvertX, gyroInvertY, usb, mouseSpeed, joyMouse, joyMouseSpeed, period, buffers };
     }
 
     private IBindable[]? applied;
@@ -186,6 +203,9 @@ internal static partial class Switch2Native
     [LibraryImport("hbxl", EntryPoint = "hbxl_input_set_kbmouse")]
     private static partial void hbxl_input_set_kbmouse(int enabled, float speed);
 
+    [LibraryImport("hbxl", EntryPoint = "hbxl_input_set_joymouse")]
+    private static partial void hbxl_input_set_joymouse(int sides, float speed);
+
     [LibraryImport("hbxl", EntryPoint = "hbxl_audio_set_queue")]
     private static partial int hbxl_audio_set_queue(int period, int buffers);
 
@@ -197,6 +217,8 @@ internal static partial class Switch2Native
 
     public static void SetKeyboardMouse(bool enabled, float speed) => hbxl_input_set_kbmouse(enabled ? 1 : 0, speed);
 
+    public static void SetJoyConMouse(int sides, float speed) => hbxl_input_set_joymouse(sides, speed);
+
     /// <summary>Returns the queue length in microseconds, 0 while the shim's output isn't open.</summary>
     public static int SetAudioQueue(int period, int buffers) => hbxl_audio_set_queue(period, buffers);
 
@@ -206,6 +228,8 @@ internal static partial class Switch2Native
         Program.Log($"switch2 settings: gyro button {button}, speed {speedX} / {speedY}, invert {invertX} / {invertY}");
 
     public static void SetKeyboardMouse(bool enabled, float speed) => Program.Log($"switch2 settings: usb keyboard/mouse {enabled}, mouse speed {speed}");
+
+    public static void SetJoyConMouse(int sides, float speed) => Program.Log($"switch2 settings: joy-con mouse sides {sides}, speed {speed}");
 
     public static int SetAudioQueue(int period, int buffers)
     {
@@ -231,6 +255,7 @@ public partial class Switch2Section : SettingsSection
         {
             new ImportSettings(config, importNow),
             new GyroSettings(config),
+            new JoyConMouseSettings(config),
             new KeyboardMouseSettings(config),
             new AudioOutputSettings(config),
             new DiagnosticsSettings(config),
@@ -330,6 +355,38 @@ public partial class Switch2Section : SettingsSection
                 })
                 {
                     Keywords = new[] { "gyro", "motion" },
+                },
+            };
+        }
+    }
+
+    private partial class JoyConMouseSettings : SettingsSubsection
+    {
+        protected override LocalisableString Header => "Joy-Con mouse";
+
+        public JoyConMouseSettings(Switch2Config config)
+        {
+            Children = new Drawable[]
+            {
+                new SettingsItemV2(new FormDropdown<string>
+                {
+                    Caption = "Use as a mouse",
+                    HintText = "A Joy-Con sliding on a surface moves the cursor; its stick then scrolls and its L/ZL or R/ZR click. Picked up, it is an ordinary controller again.",
+                    Items = Switch2Config.JOYCON_MOUSE,
+                    Current = config.GetBindable<string>(Switch2Setting.JoyConMouse),
+                })
+                {
+                    Keywords = new[] { "joycon", "mouse", "pointer", "cursor" },
+                },
+                new SettingsItemV2(new FormSliderBar<float>
+                {
+                    Caption = "Joy-Con mouse sensitivity",
+                    Current = config.GetBindable<float>(Switch2Setting.JoyConMouseSpeed),
+                    KeyboardStep = 0.1f,
+                    LabelFormat = v => speed(v),
+                })
+                {
+                    Keywords = new[] { "joycon", "mouse", "speed", "cursor" },
                 },
             };
         }

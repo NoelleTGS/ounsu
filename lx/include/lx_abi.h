@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LX_ABI_VERSION 5
+#define LX_ABI_VERSION 6
 
 /* Private syscall numbers (above Linux's range), used by the island runtime only. */
 #define LX_SYS_UNMAPSELF 0x10000 /* (base, size): unmap the calling thread's stack and end the thread */
@@ -23,7 +23,9 @@
 #define LX_INPUT_MAX_TOUCH 10
 #define LX_INPUT_GYRO 1u    /* flag: start and read the six-axis sensors */
 #define LX_INPUT_KBMOUSE 2u /* flag: read USB keyboard and mouse */
-#define LX_INPUT_POINTER 4u /* flag: read the Joy-Con 2 mouse pointer (libounce PadPointer) */
+#define LX_INPUT_POINTER 4u /* flag: read the Joy-Con 2 mouse sensors (hid Nmouse), per side */
+#define LX_INPUT_JOY_LEFT 0  /* joymouse[] index */
+#define LX_INPUT_JOY_RIGHT 1
 
 struct lx_input {
     uint64_t buttons;                                   /* HidNpadButton bits, every connected controller ORed */
@@ -39,10 +41,15 @@ struct lx_input {
     uint32_t mouse_connected;
     int32_t mouse_dx, mouse_dy, mouse_wheel;            /* summed since the previous poll */
     uint32_t mouse_buttons;                             /* HidMouseButton */
-    uint32_t pointer_active;                            /* a Joy-Con 2 is used as a mouse */
-    int32_t pointer_x, pointer_y;                       /* 0..1919, 0..1079 */
-    int32_t pointer_wheel;                              /* since the previous poll, positive upward */
-    uint32_t pointer_buttons;                           /* HidMouseButton */
+    struct {                                            /* Joy-Con 2 mouse, [LX_INPUT_JOY_LEFT] and [LX_INPUT_JOY_RIGHT] */
+        uint32_t present;                               /* number of such Joy-Cons with a mouse sensor */
+        uint32_t samples;                               /* new samples since the previous poll */
+        uint32_t tracked;                               /* new samples with Nmouse flag bit 1 (sensor tracked) */
+        uint32_t flags;                                 /* Nmouse flags of the newest sample */
+        int32_t dx, dy;                                 /* movement in 1920x1080 pointer pixels, summed */
+        int32_t wheel;                                  /* the Joy-Con's stick as a wheel, summed, positive upward */
+        uint32_t buttons;                               /* HidMouseButton of the newest sample (L/ZL or R/ZR: left) */
+    } joymouse[2];
 };
 
 struct lx_host {

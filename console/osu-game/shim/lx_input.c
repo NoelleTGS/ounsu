@@ -14,7 +14,13 @@
  *   B (held)        -> gyro cursor (the "Switch 2" settings move it; B is then the key D)
  *   D-pad           -> arrow keys
  *   USB keyboard    -> keys + text (US layout)   USB mouse -> cursor, buttons, wheel
- *   Joy-Con 2 mouse -> absolute cursor, its buttons and wheel (the Joy-Con's L/ZL or R/ZR click)
+ *   Joy-Con 2 mouse -> cursor, its buttons and wheel (the Joy-Con's L/ZL or R/ZR click), per side
+ *
+ * Joy-Con 2 mouse: a Joy-Con is "in mouse mode" from the moment its sensor tracks movement on a surface until
+ * JOYMOUSE_HOLD_NS after the last tracked sample, stick push or mouse button. In mouse mode its stick only scrolls
+ * (at the right stick's rate) and its shoulder buttons only click; otherwise its stick and buttons work as on any controller
+ * and the Nmouse wheel/buttons are ignored. So the stick never moves the cursor and scrolls at once. The "Switch 2"
+ * settings choose which sides may be a mouse (none, left, right, both) and the speed.
  *
  * Ported from HBLauncher's hbxl_input.c, which read the same things through SmileBASIC's SDK at audited offsets.
  *
@@ -63,6 +69,7 @@ void __wrap_SDL_PumpEvents(void);
 #define HID_H         720.0f
 #define POINTER_W     1920.0f /* the Joy-Con 2 mouse area (lx_input.c) */
 #define POINTER_H     1080.0f
+#define JOYMOUSE_HOLD_NS 750000000ull
 #define CURSOR_SPEED  1800.0f /* window pixels per second at full deflection */
 #define WHEEL_SPEED   12.0f   /* wheel notches per second at full deflection */
 #define GYRO_PIXELS_PER_TURN 3600.0f /* default: 10 window pixels per degree */
@@ -106,6 +113,10 @@ static volatile uint32_t gyro_button = BTN_B;
 static volatile float gyro_speed_x = 2.5f, gyro_speed_y = 1.5f, gyro_sign_x = 1.0f, gyro_sign_y = 1.0f;
 static volatile bool kbmouse_on = true;
 static volatile float mouse_speed = 1.0f;
+static volatile uint32_t joymouse_sides = 3u; /* bit LX_INPUT_JOY_LEFT, bit LX_INPUT_JOY_RIGHT */
+static volatile float joymouse_speed = 1.0f;
+static bool joymouse_on[2];      /* in mouse mode */
+static uint64_t joymouse_until[2];
 static float gyro_carry_x, gyro_carry_y;
 
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -321,15 +332,20 @@ static void pad(SDL_WindowID window, int width, int height, float dt) {
     uint32_t buttons = (uint32_t)input.buttons;
     size_t i;
 
-    move_cursor(window, width, height, curve(input.stick_lx) * CURSOR_SPEED * dt,
-                -curve(input.stick_ly) * CURSOR_SPEED * dt); /* hid: +y is up */
+    /* The right stick scrolls; the left one moves the cursor, or scrolls while the left Joy-Con is a mouse. The Nmouse
+       wheel isn't used: one small stick push gives a large value (volume straight to 0 or 100%). */
+    bool left_scrolls = joymouse_on[LX_INPUT_JOY_LEFT];
+    if (!left_scrolls)
+        move_cursor(window, width, height, curve(input.stick_lx) * CURSOR_SPEED * dt,
+                    -curve(input.stick_ly) * CURSOR_SPEED * dt); /* hid: +y is up */
 
-    wheel += curve(input.stick_ry) * WHEEL_SPEED * dt;
+    bool scrolling = input.stick_ry || (left_scrolls && input.stick_ly);
+    wheel += (curve(input.stick_ry) + (left_scrolls ? curve(input.stick_ly) : 0.0f)) * WHEEL_SPEED * dt;
     if (wheel >= 1.0f || wheel <= -1.0f) {
         float notches = (float)(int)wheel;
         push_wheel(window, notches);
         wheel -= notches;
-    } else if (input.stick_ry == 0) {
+    } else if (!scrolling) {
         wheel = 0.0f;
     }
 
@@ -345,8 +361,9 @@ static void pad(SDL_WindowID window, int width, int height, float dt) {
         }
     }
 
-    /* The gyro button sends no key, nor do the shoulder buttons while a Joy-Con 2 mouse clicks with them. */
-    uint32_t mask = gyro_button | (input.pointer_active ? BTN_L | BTN_ZL | BTN_R | BTN_ZR : 0);
+    /* The gyro button sends no key, nor do a Joy-Con's shoulder buttons while it is a mouse and clicks with them. */
+    uint32_t mask = gyro_button | (joymouse_on[LX_INPUT_JOY_LEFT] ? BTN_L | BTN_ZL : 0) |
+                    (joymouse_on[LX_INPUT_JOY_RIGHT] ? BTN_R | BTN_ZR : 0);
     for (i = 0; i < sizeof key_map / sizeof key_map[0]; i++) {
         bool down = (buttons & key_map[i].buttons & ~mask) != 0;
         if (down != ((keys_down >> i) & 1u)) {
@@ -359,7 +376,7 @@ static void pad(SDL_WindowID window, int width, int height, float dt) {
 /* ---- USB keyboard and mouse, Joy-Con 2 mouse ------------------------------------------------------------------- */
 
 static uint8_t keys_prev[32];
-static bool keyboard_seen, mouse_seen, pointer_seen;
+static bool keyboard_seen, mouse_seen;
 static SDL_Scancode repeat_key;
 static uint64_t repeat_at;
 
@@ -370,6 +387,14 @@ void hbxl_input_set_kbmouse(int enabled, float speed) {
     if (speed > 0.05f && speed < 20.0f) mouse_speed = speed;
     logf_("lx-input: USB keyboard/mouse %s, mouse speed %.2f [settings]", kbmouse_on ? "on" : "off",
           (double)mouse_speed);
+}
+
+/* "Switch 2" settings: which Joy-Cons may be a mouse (sides: bit 0 left, bit 1 right) and the mouse speed. */
+void hbxl_input_set_joymouse(int sides, float speed) {
+    static const char *names[] = { "off", "left Joy-Con only", "right Joy-Con only", "both Joy-Cons" };
+    joymouse_sides = (uint32_t)sides & 3u;
+    if (speed > 0.05f && speed < 20.0f) joymouse_speed = speed;
+    logf_("lx-input: Joy-Con mouse %s, speed %.2f [settings]", names[joymouse_sides], (double)joymouse_speed);
 }
 
 /* US layout. Returns 0 for keys that don't type anything. */
@@ -487,8 +512,7 @@ static uint32_t sdl_buttons(uint32_t hid) {
     return m;
 }
 
-static void mice(SDL_WindowID window, int width, int height) {
-    static int32_t pointer_last_x = -1, pointer_last_y = -1;
+static void mice(SDL_WindowID window, int width, int height, uint64_t now) {
     extra_buttons = 0;
 
     if (kbmouse_on && input.mouse_connected) {
@@ -505,22 +529,28 @@ static void mice(SDL_WindowID window, int width, int height) {
         extra_buttons |= sdl_buttons(input.mouse_buttons);
     }
 
-    if (input.pointer_active) {
-        if (!pointer_seen) {
-            pointer_seen = true;
-            hbxl_log("lx-input: Joy-Con 2 mouse in use");
+    for (int side = 0; side < 2; side++) {
+        static const char *names[] = { "left", "right" };
+        const __typeof__(input.joymouse[0]) *jm = &input.joymouse[side];
+        int32_t stick_x = side ? input.stick_rx : input.stick_lx, stick_y = side ? input.stick_ry : input.stick_ly;
+        bool was = joymouse_on[side];
+
+        if (!(joymouse_sides & (1u << side)) || !jm->present) {
+            joymouse_on[side] = false;
+        } else {
+            bool moved = jm->tracked && (jm->dx || jm->dy);
+            if (moved) joymouse_on[side] = true;
+            /* Still on the surface, scrolling or clicking keeps a mouse a mouse. */
+            if (joymouse_on[side] && (moved || jm->tracked || stick_x || stick_y || jm->buttons))
+                joymouse_until[side] = now + JOYMOUSE_HOLD_NS;
+            if (joymouse_on[side] && now >= joymouse_until[side]) joymouse_on[side] = false;
         }
-        /* Absolute: follow the pointer whenever it moves (other inputs move the cursor in between). */
-        if (input.pointer_x != pointer_last_x || input.pointer_y != pointer_last_y) {
-            float x = (float)input.pointer_x * (float)width / POINTER_W, y = (float)input.pointer_y * (float)height / POINTER_H;
-            move_cursor(window, width, height, x - cursor_x, y - cursor_y);
-            pointer_last_x = input.pointer_x;
-            pointer_last_y = input.pointer_y;
-        }
-        if (input.pointer_wheel) push_wheel(window, (float)input.pointer_wheel);
-        extra_buttons |= sdl_buttons(input.pointer_buttons);
-    } else {
-        pointer_last_x = pointer_last_y = -1;
+        if (joymouse_on[side] != was) logf_("lx-input: %s Joy-Con %s", names[side], joymouse_on[side] ? "is a mouse" : "is a controller");
+        if (!joymouse_on[side]) continue;
+
+        move_cursor(window, width, height, (float)jm->dx * joymouse_speed * (float)width / POINTER_W,
+                    (float)jm->dy * joymouse_speed * (float)height / POINTER_H);
+        extra_buttons |= sdl_buttons(jm->buttons);
     }
 }
 
@@ -560,7 +590,7 @@ void __wrap_SDL_PumpEvents(void) {
     if (dt > 0.1f) dt = 0.1f;
     last_ns = now;
 
-    uint32_t flags = LX_INPUT_POINTER | (kbmouse_on ? LX_INPUT_KBMOUSE : 0);
+    uint32_t flags = (joymouse_sides ? LX_INPUT_POINTER : 0) | (kbmouse_on ? LX_INPUT_KBMOUSE : 0);
     if (gyro_button) flags |= LX_INPUT_GYRO; /* sensors start on the first held press (cheap after that) */
     if ((flags & LX_INPUT_GYRO) && !gyro_held() && !input.gyro_sensors) flags &= ~LX_INPUT_GYRO;
     if (!lx_input_poll(&input, flags)) {
@@ -576,7 +606,7 @@ void __wrap_SDL_PumpEvents(void) {
     }
 
     touch(window, width, height);
-    mice(window, width, height);
+    mice(window, width, height, now);
     pad(window, width, height, dt);
     gyro(window, width, height, dt);
     keyboard(win, window, now);
