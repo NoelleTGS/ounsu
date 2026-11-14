@@ -169,6 +169,12 @@ lx_vk_void_fn vkGetInstanceProcAddr(void *instance, const char *name) {
 }
 
 /* The console's default window (NWindow *) for VkViSurfaceCreateInfoNN.window. */
+int lx_input_poll(struct lx_input *out, uint32_t flags) {
+    if (g_host->size < offsetof(struct lx_host, input_poll) + sizeof g_host->input_poll || !g_host->input_poll) return 0;
+    g_host->input_poll(out, flags);
+    return 1;
+}
+
 void *lx_vi_window(void) {
     return g_host->vi_window;
 }

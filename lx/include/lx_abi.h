@@ -14,10 +14,36 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LX_ABI_VERSION 3
+#define LX_ABI_VERSION 4
 
 /* Private syscall numbers (above Linux's range), used by the island runtime only. */
 #define LX_SYS_UNMAPSELF 0x10000 /* (base, size): unmap the calling thread's stack and end the thread */
+
+/* Input, as libnx reads it (lx/host/lx_input.c). Plain fields only; the island turns them into SDL events. */
+#define LX_INPUT_MAX_TOUCH 10
+#define LX_INPUT_GYRO 1u    /* flag: start and read the six-axis sensors */
+#define LX_INPUT_KBMOUSE 2u /* flag: read USB keyboard and mouse */
+#define LX_INPUT_POINTER 4u /* flag: read the Joy-Con 2 mouse pointer (libounce PadPointer) */
+
+struct lx_input {
+    uint64_t buttons;                                   /* HidNpadButton bits, every connected controller ORed */
+    int32_t stick_lx, stick_ly, stick_rx, stick_ry;     /* -32767..32767, +y up; per stick, the pad pushed furthest */
+    uint32_t touch_count;
+    struct {
+        uint32_t id, x, y;                              /* x, y in 1280x720 */
+    } touch[LX_INPUT_MAX_TOUCH];
+    float gyro[3];                                      /* angular velocity (turns/s) of the sensor turning fastest */
+    uint32_t gyro_sensors;                              /* sensors started (0: none or not requested) */
+    uint32_t kb_modifiers;                              /* HidKeyboardModifier */
+    uint8_t kb_keys[32];                                /* held keys, bit per USB HID usage (= SDL_Scancode) */
+    uint32_t mouse_connected;
+    int32_t mouse_dx, mouse_dy, mouse_wheel;            /* summed since the previous poll */
+    uint32_t mouse_buttons;                             /* HidMouseButton */
+    uint32_t pointer_active;                            /* a Joy-Con 2 is used as a mouse */
+    int32_t pointer_x, pointer_y;                       /* 0..1919, 0..1079 */
+    int32_t pointer_wheel;                              /* since the previous poll, positive upward */
+    uint32_t pointer_buttons;                           /* HidMouseButton */
+};
 
 struct lx_host {
     uint32_t version; /* LX_ABI_VERSION */
@@ -51,6 +77,10 @@ struct lx_host {
     char *const *argv;
     char *const *envp;
     const uint8_t *random16; /* 16 random bytes for AT_RANDOM */
+
+    /* Version 4. Controllers, touch screen, six-axis, USB keyboard/mouse and the Joy-Con 2 mouse. flags: LX_INPUT_*.
+       Call it from one thread. */
+    void (*input_poll)(struct lx_input *out, uint32_t flags);
 };
 
 /* Exported by the island. Runs the program on the given main stack and returns its exit status when the program

@@ -98,10 +98,14 @@ def main() -> None:
             runtime += [compile_source(ROOT / "lx/dotnet/lx_vk.c", work, [f"-I{vk_include}"]),
                         compile_source(gen / "vk_tramp.S", work),
                         compile_source(gen / "vk_names.c", work, ["-Wno-error"])]
+        # -I... extras are include paths for the extra C sources, everything else goes to the link.
+        cflags = [e for e in extras if e.startswith("-I")]
         extra_inputs = []
         for e in extras:
+            if e.startswith("-I"):
+                continue
             p = Path(e)
-            extra_inputs.append(str(compile_source(p, work)) if p.suffix in (".c", ".S") else e)
+            extra_inputs.append(str(compile_source(p, work, cflags)) if p.suffix in (".c", ".S") else e)
 
         flags = [f"-Wl,--wrap={w}" for w in WRAPS] + ["-Wl,--defsym,__xmknod=mknod"]
         subprocess.run(["sh", str(ROOT / "tools/make-island.sh"), str(out), *flags,

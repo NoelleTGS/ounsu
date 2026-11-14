@@ -223,3 +223,30 @@ empty and osu! never got past its database. What the runs found, in order:
 5. Harmless: MIDI's ALSA lookup fails and is caught; inotify (EMFILE now), sched_getparam/getscheduler answered.
 6. ounceshell's FTP server (port 1337) crashed on `LIST /` (a path argument). `tools/ftp-upload.py` uses only CWD by
    bare name, CDUP, plain LIST, MKD and STOR; it put osu-resources (127 MiB) on the card at 1.4 MiB/s.
+
+## 2026-11-14: osu! renders and takes input (Test 6, runs 5-10)
+
+- **Run 5:** the shared card handles work: Realm opens ("Opened realm ... at version 52"), osu! reaches the main menu
+  at 60 fps. It died after ~20 s with the system's "there was a problem and the software needed to close" (a CPU
+  fault; Test 0b: faults never reach the app).
+- **Runs 6-8:** the same fault after ~3 s, right after "switch2 settings: loaded". The syscall trace of runs 5 and 8
+  ended the same way on one thread: `openat(".../cache/fonts", O_DIRECTORY)`, fcntl, mmap: the start of a directory
+  listing. **Cause: lx_getdents64 used newlib's telldir/seekdir to push back an entry that didn't fit the 2 KiB
+  buffer; they don't work on libnx's DIR.** Only a listing over one buffer takes that path, and the font cache
+  (~75-character glyph-page names) was the first, once a previous run had filled it. Fixed with a one-entry stash in
+  the fd. Lesson: when every run dies at the same syscall, suspect the host's handler of the NEXT call too.
+- **Empty screen:** osu-framework recreates its swapchain once at start (and again for a present mode change, FIFO ->
+  MAILBOX). lx_vk.c now hands back the existing swapchain for a same-size recreation and swallows the destroy of the
+  "old" one (HBLauncher did the same), and gives back the image acquired before the reuse on the next acquire (empty
+  submit signalling its semaphore/fence), as HBLauncher's shim did. `LX_VK_KEEP_SWAPCHAIN=0` turns it off.
+- **Run 9:** first-run setup on screen (ShadowCast), main menu at 60 fps draw / 240 Hz update, stable for 75 s.
+- The card's file system also fails **stat (ENOENT) and unlink (EIO) on an open file**: osu!'s online.db.bz2 download
+  (three concurrent writers, then open-for-read -> ENOENT, delete -> EIO). stat/open now look up the shared handle
+  first, and unlink of an open file is deferred to its last close (the path reads as gone meanwhile).
+- **Run 10: input works, all of it** (user-tested): controllers (buttons ORed, each stick from the pad pushed
+  furthest), touch screen, gyro cursor (4 six-axis sensors started: handheld, full key, Joy-Con pair), USB keyboard
+  and mouse, and the **Joy-Con 2 mouse** through libounce's PadPointer (absolute 1920x1080 pointer; the Joy-Con's
+  L/ZL or R/ZR click, so those buttons send no key while it is active). Host: `lx/host/lx_input.c`, one
+  `input_poll(struct lx_input *, flags)` entry (ABI 4). Island: `console/osu-game/shim/lx_input.c` wraps
+  SDL_PumpEvents and pushes SDL events (the HBLauncher mapping, minus its SDK offsets and watchdog).
+- The first ShadowCast frame after opening the device can be black even with `select=gte(n,10)`: take a second one.

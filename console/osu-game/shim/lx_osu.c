@@ -7,8 +7,8 @@
  * - hbx_switch2_vi_window (osu-framework's HbxlNative.ViWindow): the console's window, from the island runtime.
  * - hbxl_log and the diagnostics osu-game's Program.cs calls (thread dumps, stall beats): logging works, the
  *   thread-dump calls report nothing for now.
- * - The "Switch 2" settings' setters (input, audio queue, GC log): no-ops until input and audio are ported
- *   (hbxl_input.c / hbxl_audio_out.c, next steps).
+ * - The "Switch 2" settings' setters for the audio queue and GC log: no-ops until audio is ported
+ *   (hbxl_audio_out.c, next step). The input setters are in lx_input.c.
  */
 #include <stddef.h>
 #include <stdint.h>
@@ -86,19 +86,6 @@ void hbxl_stall_beat(int which) {
 }
 
 /* ---- the "Switch 2" settings' setters (Switch2Settings.cs) ------------------------------------------------------ */
-
-void hbxl_input_set_gyro(int button, float speed_x, float speed_y, int invert_x, int invert_y) {
-    (void)button;
-    (void)speed_x;
-    (void)speed_y;
-    (void)invert_x;
-    (void)invert_y;
-}
-
-void hbxl_input_set_kbmouse(int enabled, float speed) {
-    (void)enabled;
-    (void)speed;
-}
 
 int hbxl_audio_set_queue(int period, int buffers) {
     (void)period;

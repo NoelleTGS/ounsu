@@ -39,19 +39,16 @@ default**; nxlink is only a development log channel. Never design features aroun
     stages; window fixed at 1920x1080 because swapchain recreation fails on the console's window), networking
     (Test 5, 13/13: sockets, epoll, DNS, OpenSSL TLS). SDL decision: the hbxl SDL3 stays in the island (host-side SDL
     would call managed code from non-island threads).
-  - **Phase 4 in progress (2026-11-14): osu! starts** (renderer up, 60 fps draw/update) but the screen is empty and
-    Realm didn't open yet. See FEASIBILITY.md 2026-11-14. **Next session, in order:**
-    1. Send the current build (`console/osu-game/build/osu.nro`, built with the shared card handles, never run) and
-       check that Realm opens. (hbmenu's netloader saves each sent .nro as `sdmc:/switch/osu.nro`; launching that from
-       hbmenu runs the PREVIOUS build.)
-    2. Empty screen: keep the one swapchain in `lx/dotnet/lx_vk.c` when osu-framework recreates it at the same size
-       (a second swapchain on the console's window stops presenting; Test 4 history). Check with the ShadowCast.
-    3. Input: port `console/osu-game/shim/hbxl_input.c` (SDL_PushEvent path) onto new `struct lx_host` entries backed
-       by libnx pad/hid (touch, six-axis, USB keyboard/mouse; try Joy-Con 2 mouse mode). Wrap SDL_PumpEvents again.
-    4. Audio: port `hbxl_audio_out.c` onto libnx audout via a host entry; drop SDL_AUDIO_DRIVER=dummy and
+  - **Phase 4 in progress (2026-11-14): osu! renders and takes input** (runs 5-10, FEASIBILITY.md 2026-11-14): Realm
+    opens, first-run setup and main menu on screen at 60 fps, and every input works (pad, touch, gyro, USB keyboard/
+    mouse, **Joy-Con 2 mouse** via libounce PadPointer; `lx/host/lx_input.c` + `console/osu-game/shim/lx_input.c`,
+    ABI 4). hbmenu's netloader saves each sent .nro as `sdmc:/switch/osu.nro`; launching that from hbmenu runs the
+    PREVIOUS build. **Next, in order:**
+    1. Audio: port `hbxl_audio_out.c` onto libnx audout via a host entry; drop SDL_AUDIO_DRIVER=dummy and
        OSU_HBXL_NO_AUDIO from the romfs lx-env.
-    5. Port `hbxl_gc_timing.c`'s pressure-GC downgrade (gen2 -> gen1); consider OptimizationPreference=Speed (the
+    2. Port `hbxl_gc_timing.c`'s pressure-GC downgrade (gen2 -> gen1); consider OptimizationPreference=Speed (the
        Size setting was for hbxl's 240 MiB SDK heap); exit/relaunch back to hbmenu; the docked/4K window and 120 Hz.
+    3. Later (user's wish): USB drawing tablets.
   - **Workflow:** `sh console/osu-game/build.sh` (~15 min, ILC) or `LX_SKIP_PUBLISH=1 sh console/osu-game/build.sh`
     (relink, ~70 s). Claude sends builds itself so the log can be read: `nxlink -s -a 192.168.1.177 <nro> >
     logs/<name>.log 2>&1` in the background (the user puts hbmenu in netloader mode with Y), plus a Monitor on the log.
@@ -68,8 +65,8 @@ default**; nxlink is only a development log channel. Never design features aroun
   (make-base.py lists every static library osu! links).
 - **Devkit installed** 2026-11-13: ounce-devkit 20261114 (libounce 9382b1e, OunceVK f5afcd2, kaiHEN eb81e19) in
   `/opt/devkitpro`. Arch's pacman needs both `[dkp-libs]` and `[dkp-linux]` repos.
-- **For later: mouse controls.** kaiHEN runs homebrew inside a *Switch 2* game, not a Switch 1 title, so Joy-Con 2 mouse
-  mode (dead end on HBLauncher) may deliver input now. Check libounce's hid API for it once input works (Phase 3+).
+- **Joy-Con 2 mouse mode works** (2026-11-14, run 10): libounce's `PadPointer` (Nmouse, `switch2/services/nmouse.h`).
+- **For later: USB drawing tablets** (user's wish, after the rest of Phase 4).
 
 ## Who does what
 

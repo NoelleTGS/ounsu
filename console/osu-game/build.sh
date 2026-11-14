@@ -47,7 +47,8 @@ fi
 
 # veldrid-spirv is real C++ and links the real libstdc++: NativeAOT's stand-in has to go.
 python3 "$ROOT/tools/aot-island.py" "$LX_CAPTURE" "$HERE" "$HERE/build/island.o" --vulkan --exclude libstdc++compat.a \
-    "$HERE/shim/lx_osu.c" "$HERE/shim/bass_stubs.S" "$HERE/shim/bass_devices.c" \
+    -I"$ROOT/src/native/SDL/include" -Wl,--wrap=SDL_PumpEvents \
+    "$HERE/shim/lx_osu.c" "$HERE/shim/lx_input.c" "$HERE/shim/bass_stubs.S" "$HERE/shim/bass_devices.c" \
     "$HERE/obj/ssl_syms.c" "$HERE/obj/ffmpeg_syms.c" "$SDL" \
     -Wl,--start-group $SPIRV_LIBS "$SSL/libssl.a" "$SSL/libcrypto.a" "$SQLITE" $REALM_LIBS \
     "$FF/libavformat.a" "$FF/libavcodec.a" "$FF/libswresample.a" "$FF/libavutil.a" -Wl,--end-group -lstdc++ -lm

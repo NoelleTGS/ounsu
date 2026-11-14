@@ -136,6 +136,7 @@ int main(int argc, char **argv) {
     host.clone = lx_clone;
     host.log = island_log;
     host.resolve_ipv4 = lx_resolve_ipv4;
+    host.input_poll = lx_input_poll;
 #ifdef LX_VULKAN
     /* The window is 1280x720 by default. A swapchain of another size presents as VK_SUBOPTIMAL_KHR, the program
        (Veldrid) recreates it, and a second swapchain on the console's window fails (gfx-probe, 2026-11-13). Size the
