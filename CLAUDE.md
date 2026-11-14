@@ -52,7 +52,11 @@ default**; nxlink is only a development log channel. Never design features aroun
   - **Workflow:** `sh console/osu-game/build.sh` (~15 min, ILC) or `LX_SKIP_PUBLISH=1 sh console/osu-game/build.sh`
     (relink, ~70 s). Claude sends builds itself so the log can be read: `nxlink -s -a 192.168.1.177 <nro> >
     logs/<name>.log 2>&1` in the background (the user puts hbmenu in netloader mode with Y), plus a Monitor on the log.
-    `LX_TRACE=1` in `sdmc:/switch/osu/lx-env` (or the romfs lx-env) logs every syscall. Files onto the card:
+    nxlink is not on PATH: use `/opt/devkitpro/tools/bin/nxlink`. A previous nxlink still running holds the stdio
+    port ("bind listen socket: Address already in use": the game runs without a log): kill it before sending. nxlink
+    prints "exiting ..." whenever the connection drops (crash, exit, or the user undocking, which cuts the ethernet);
+    a crash shows no `lx: program exited` line. `LX_TRACE=1` in `sdmc:/switch/osu/lx-env` (or the romfs lx-env, via
+    `LX_ENV_EXTRA="LX_TRACE=1"` on build.sh) logs every syscall. Files onto the card:
     `tools/ftp-upload.py` with ounceshell's FTP server. The native libraries come from `~/osu-HBLauncher/src/native`
     (musl builds, `LX_NATIVE_BUILDS`), except OpenSSL and FFmpeg (this repo's src/native). On the card:
     `/switch/osu/osu-resources` (uploaded 2026-11-14), osu! data in `/switch/osu/home/.local/share/osu` (fresh).
