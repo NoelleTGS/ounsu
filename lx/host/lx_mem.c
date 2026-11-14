@@ -1,0 +1,130 @@
+/*
+ * mmap and friends for the island, from the newlib heap.
+ *
+ * Phase 1: anonymous mappings only, each one an aligned heap block. What the HBLauncher runtime learned (memory.c and
+ * its local changes) and the GC will need later:
+ * - MAP_FIXED anonymous over memory we own = zero-fill and succeed: the .NET GC decommits that way and expects the
+ *   pages to read as zero when it re-commits them (done here).
+ * - madvise(DONTNEED) must zero too (done here).
+ * - The GC reserves its whole region range up front (1 GiB); that is real memory here, as on hbxl. Phase 2.
+ * - Partial munmap of a block can't give memory back: the range is zeroed and the block stays until all of it is
+ *   unmapped.
+ */
+#include <switch.h>
+
+#include <stdlib.h>
+#include <string.h>
+
+#include "lx_host.h"
+
+#define PAGE 4096u
+#define MAP_FIXED 0x10
+#define MAP_ANONYMOUS 0x20
+#define MAX_BLOCKS 8192
+
+struct block {
+    uintptr_t base;
+    size_t size;
+    size_t unmapped; /* bytes of it already munmapped */
+};
+
+static struct block g_blocks[MAX_BLOCKS];
+static int g_nblocks;
+static size_t g_mapped;
+static Mutex g_lock;
+static uintptr_t g_main_stack_lo, g_main_stack_hi;
+
+void lx_mem_set_main_stack(uintptr_t lo, uintptr_t hi) {
+    g_main_stack_lo = lo;
+    g_main_stack_hi = hi;
+}
+
+size_t lx_mem_mapped(void) {
+    return g_mapped;
+}
+
+static struct block *find(uintptr_t addr) {
+    for (int i = 0; i < g_nblocks; i++)
+        if (addr >= g_blocks[i].base && addr < g_blocks[i].base + g_blocks[i].size) return &g_blocks[i];
+    return NULL;
+}
+
+long lx_mmap(uintptr_t addr, size_t len, int prot, int flags, int fd, long off) {
+    (void)prot;
+    (void)off;
+    if (!len) return -LX_EINVAL;
+    len = (len + PAGE - 1) & ~(size_t)(PAGE - 1);
+    if (!(flags & MAP_ANONYMOUS) || fd != -1) return -LX_ENOSYS; /* file mappings: later */
+
+    mutexLock(&g_lock);
+    if (flags & MAP_FIXED) {
+        struct block *b = find(addr);
+        long r = -LX_ENOMEM;
+        if (b && addr + len <= b->base + b->size) {
+            memset((void *)addr, 0, len);
+            r = (long)addr;
+        }
+        mutexUnlock(&g_lock);
+        return r;
+    }
+    if (g_nblocks == MAX_BLOCKS) {
+        mutexUnlock(&g_lock);
+        lx_logf("lx: mmap: block table full");
+        return -LX_ENOMEM;
+    }
+    void *p = aligned_alloc(PAGE, len);
+    if (!p) {
+        mutexUnlock(&g_lock);
+        return -LX_ENOMEM;
+    }
+    memset(p, 0, len);
+    g_blocks[g_nblocks++] = (struct block){ (uintptr_t)p, len, 0 };
+    g_mapped += len;
+    mutexUnlock(&g_lock);
+    return (long)(uintptr_t)p;
+}
+
+long lx_munmap(uintptr_t addr, size_t len) {
+    len = (len + PAGE - 1) & ~(size_t)(PAGE - 1);
+    mutexLock(&g_lock);
+    struct block *b = find(addr);
+    if (!b) {
+        mutexUnlock(&g_lock);
+        return 0; /* Linux: unmapping nothing is fine */
+    }
+    if (addr == b->base && len >= b->size) {
+        b->unmapped = b->size;
+    } else {
+        size_t end = addr + len > b->base + b->size ? b->base + b->size - addr : len;
+        memset((void *)addr, 0, end);
+        b->unmapped += end;
+    }
+    if (b->unmapped >= b->size) {
+        free((void *)b->base);
+        g_mapped -= b->size;
+        *b = g_blocks[--g_nblocks];
+    }
+    mutexUnlock(&g_lock);
+    return 0;
+}
+
+long lx_mremap(uintptr_t addr, size_t old_len, size_t new_len, int flags) {
+    (void)old_len;
+    (void)new_len;
+    (void)flags;
+    /* musl's pthread_getattr_np finds the main stack's bottom by mremap probes going down until one fails with
+       something other than ENOMEM: say "mapped" (ENOMEM) inside the main stack, "unmapped" (EFAULT) elsewhere. */
+    if (addr >= g_main_stack_lo && addr < g_main_stack_hi) return -LX_ENOMEM;
+    if (find(addr)) return -LX_ENOMEM; /* can't grow a heap block in place */
+    return -LX_EFAULT;
+}
+
+long lx_madvise(uintptr_t addr, size_t len, int advice) {
+    if (advice == 4 /* MADV_DONTNEED */) {
+        mutexLock(&g_lock);
+        struct block *b = find(addr);
+        if (b && addr + len <= b->base + b->size) memset((void *)addr, 0, len);
+        mutexUnlock(&g_lock);
+    }
+    return 0;
+}

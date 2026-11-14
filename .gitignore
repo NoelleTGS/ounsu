@@ -9,6 +9,7 @@
 !/FEASIBILITY.md
 !/TESTING.md
 !/console/
+!/lx/
 !/probes/
 !/tools/
 !/patches/
@@ -36,3 +37,6 @@ __pycache__/
 
 # hub-probe: published test server
 /probes/hub-probe/server/out/
+*.nro
+*.nacp
+*.map

@@ -23,12 +23,15 @@ default**; nxlink is only a development log channel. Never design features aroun
   `__lx_syscall` (patched musl syscall hook), `vkGetInstanceProcAddr` (OunceVK, via the island's fake dlopen) and a few
   host calls. A libounce `.nro` (`console/lx/`, to be written) implements the Linux syscalls on libnx. This is a port of
   hbxl's runtime.c/memory.c/thread.c/vfs.c/net.c, minus the file server.
-  - Phase 0: devkit + vulkan-clear over nxlink; read libounce for: TLS register (island needs `tpidr_el0` free;
-    libnx is believed to use `tpidrro_el0`+0x1F8), exception-handler resume, heap size, JIT mapping addresses,
-    threads left running at exit.
-  - Phase 1: hello island (`tools/make-island.sh`). Phase 2: aot-hello stages 0-6 (thunks: prebuilt block vs JIT API).
-    Phase 3: Vulkan, audout, pad/hid, bsd sockets. Phase 4: osu-game nro + SD layout + clean exit. Phase 5: faults →
-    managed exceptions via `__libnx_exception_handler`.
+  - Phase 0: devkit + vulkan-clear over nxlink; read libounce for: ~~TLS register~~ (**done: `tpidr_el0` is unused by
+    the whole devkit**, which uses `tpidrro_el0`+0x1F8 via `-mtp=soft`), exception resume (**no: CPU exceptions never reach the app on
+    20261114c either**, Test 0b; faults stay fatal as on hbxl, Phase 5 parked; see FEASIBILITY.md), heap size, JIT mapping
+    addresses, threads left running at exit.
+  - **Phase 1 DONE 2026-11-13** (Test 1, 2022/2022 checks on hardware): `lx/island` (musl side), `lx/host` (libounce
+    .nro: syscalls, mmap, clone/futex), `tools/make-island.sh`, `probes/hello-island`. Process memory: 9152 MiB total.
+    Phase 2: aot-hello stages 0-6 (thunks: prebuilt block vs JIT API).
+    Phase 3: Vulkan, audout, pad/hid, bsd sockets. Phase 4: osu-game nro + SD layout + clean exit. Phase 5 (faults →
+    managed exceptions) is parked: the loader never gets the exceptions.
 - HBLauncher-only material was left out of this repo on 2026-11-13: bti-probe, vfs-hosttest, the net host tests, the
   HBLauncher/ns2jb patches, the file-server/UDP/unplug tools, hbxl-env, hbxl_sb_input.c, symbolize.py, the generated
   hbxl-build manifests (they had absolute home paths; `~/osu-HBLauncher` has them), and the PC-link code in
@@ -150,7 +153,8 @@ Disk space is tight (~20 GB free on `/` on 2026-11-13).
 | `ounce-hbloader/`, `ounce-hbmenu/` | The loader (nx-hbloader based; same environment as nx-hbloader, extra cleanup after exit) and hbmenu (`sdmc:/hbmenu.nro`) |
 | `ounceshell/` | VitaShell port (file manager, FTP server), a large C homebrew example (`switch2/`) |
 | `Checkpoint/` | Save manager port: GLES 3 instead of deko3d (`switch/source/gfx_gles.cpp`, `HEN` block in `switch/Makefile`) |
-| `kaizhar/` | Azahar (3DS emulator) port: the best reference for a big C++ app. `hen/` = compat (missing libc/socket/OpenSSL bits), `platform/` (POSIX fixes, thread cores/stacks, `sys/mman.h` + `dlfcn.h` stubs), `jit/hen_jit.c` (code memory), `vktrace/`; `src/citra_switch/switch_platform.c` (nxlink log, sockets, exception → addr2line dump, system messages) |
+| `dusklight/` (`ad781a8`) | **Dusklight (Twilight Princess decomp) on kaiHEN, CC0: copying code from it is fine.** `hen/platform/` (start-up/exit, nxlink + SD log, threads on all cores + 8 MiB stacks, cond-var exit hygiene, Vulkan leftovers, malloc lock, shader-cache write queue, pipe/poll, POSIX SD semantics), `hen/patches/sdl3-switch2.patch` (Switch 2 SDL3 on devkitPro's SDL 3.4.10 port). Lessons summarised in FEASIBILITY.md 2026-11-13 |
+| `kaizhar/` | Azahar (3DS emulator) port: the best reference for a big C++ app. `hen/` = compat (missing libc/socket/OpenSSL bits), `platform/` (POSIX fixes, thread cores/stacks, `sys/mman.h` + `dlfcn.h` stubs), `jit/hen_jit.c` (code memory), `vktrace/`; `src/citra_switch/switch_platform.c` (nxlink log, sockets, exception → addr2line dump, system messages). GPLv2+: read it, don't copy from it |
 
 kaiHEN's own docs for the JIT and plugin APIs are `JIT.md` and `PLUGINS.md` in kaiHEN's `libkaihen/`. They aren't in this
 folder: kaiHEN's source is fetched by `ounce-devkit/build/make-devkit.sh` (pinned in `build/sources`), and `kaihen.h`
