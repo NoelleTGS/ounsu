@@ -85,6 +85,10 @@ long lx_epoll_ctl(int epfd, int op, int fd, const void *ev);
 long lx_epoll_wait(int epfd, void *events, int max, int timeout_ms);
 int lx_resolve_ipv4(const char *name, uint32_t *out, int max);
 void lx_input_poll(struct lx_input *out, uint32_t flags); /* lx_input.c */
+int lx_audio_open(uint32_t period, uint32_t buffers);      /* lx_audio.c */
+int lx_audio_submit(const void *pcm, uint32_t bytes);
+int lx_audio_queued(void);
+void lx_audio_close(void);
 
 /* lx_vulkan.c (hosts built with VULKAN=1) */
 void *lx_vk_get_instance_proc_addr(void *instance, const char *name);

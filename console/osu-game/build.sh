@@ -47,8 +47,11 @@ fi
 
 # veldrid-spirv is real C++ and links the real libstdc++: NativeAOT's stand-in has to go.
 python3 "$ROOT/tools/aot-island.py" "$LX_CAPTURE" "$HERE" "$HERE/build/island.o" --vulkan --exclude libstdc++compat.a \
-    -I"$ROOT/src/native/SDL/include" -Wl,--wrap=SDL_PumpEvents \
-    "$HERE/shim/lx_osu.c" "$HERE/shim/lx_input.c" "$HERE/shim/bass_stubs.S" "$HERE/shim/bass_devices.c" \
+    -I"$ROOT/src/native/SDL/include" -Wl,--wrap=SDL_PumpEvents -Wl,--wrap=SDL_OpenAudioDeviceStream \
+    -Wl,--wrap=SDL_ResumeAudioStreamDevice -Wl,--wrap=SDL_PauseAudioStreamDevice -Wl,--wrap=SDL_DestroyAudioStream \
+    -Wl,--wrap=RhpCollect -Wl,--wrap=_ZN11ThreadStore17SuspendAllThreadsEb \
+    -Wl,--wrap=_ZN11ThreadStore16ResumeAllThreadsEb \
+    "$HERE/shim/lx_osu.c" "$HERE/shim/lx_input.c" "$HERE/shim/lx_audio_out.c" "$HERE/shim/lx_gc.c" "$HERE/shim/bass_stubs.S" "$HERE/shim/bass_devices.c" \
     "$HERE/obj/ssl_syms.c" "$HERE/obj/ffmpeg_syms.c" "$SDL" \
     -Wl,--start-group $SPIRV_LIBS "$SSL/libssl.a" "$SSL/libcrypto.a" "$SQLITE" $REALM_LIBS \
     "$FF/libavformat.a" "$FF/libavcodec.a" "$FF/libswresample.a" "$FF/libavutil.a" -Wl,--end-group -lstdc++ -lm
@@ -58,7 +61,6 @@ cat > obj/romfs/lx-env <<'EOF'
 # osu-game's default environment (build.sh). Lines in /switch/osu/lx-env on the SD card come first and win.
 SDL_VIDEO_DRIVER=offscreen
 SDL_AUDIO_DRIVER=dummy
-OSU_HBXL_NO_AUDIO=1
 OSU_RESOURCES_DIR=/osu-resources
 EOF
 # LX_ENV_EXTRA: extra lines for a test build (e.g. LX_ENV_EXTRA="LX_TRACE=1").

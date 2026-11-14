@@ -175,6 +175,24 @@ int lx_input_poll(struct lx_input *out, uint32_t flags) {
     return 1;
 }
 
+#define HAS(field) (g_host->size >= offsetof(struct lx_host, field) + sizeof g_host->field && g_host->field)
+
+int lx_audio_open(uint32_t period, uint32_t buffers) {
+    return HAS(audio_open) ? g_host->audio_open(period, buffers) : -38 /* ENOSYS */;
+}
+
+int lx_audio_submit(const void *pcm, uint32_t bytes) {
+    return g_host->audio_submit(pcm, bytes);
+}
+
+int lx_audio_queued(void) {
+    return g_host->audio_queued();
+}
+
+void lx_audio_close(void) {
+    if (HAS(audio_close)) g_host->audio_close();
+}
+
 void *lx_vi_window(void) {
     return g_host->vi_window;
 }

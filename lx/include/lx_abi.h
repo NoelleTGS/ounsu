@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LX_ABI_VERSION 4
+#define LX_ABI_VERSION 5
 
 /* Private syscall numbers (above Linux's range), used by the island runtime only. */
 #define LX_SYS_UNMAPSELF 0x10000 /* (base, size): unmap the calling thread's stack and end the thread */
@@ -81,6 +81,15 @@ struct lx_host {
     /* Version 4. Controllers, touch screen, six-axis, USB keyboard/mouse and the Joy-Con 2 mouse. flags: LX_INPUT_*.
        Call it from one thread. */
     void (*input_poll)(struct lx_input *out, uint32_t flags);
+
+    /* Version 5. Audio output (libnx audout, lx/host/lx_audio.c): 48 kHz, stereo, s16. audio_open allocates
+       `buffers` host buffers of `period` frames and starts the output; returns 0 or a negative error. audio_submit
+       copies up to one period into a free buffer and queues it: 1 queued, 0 every buffer is still playing, < 0 error.
+       audio_queued: buffers still playing. One output at a time; calls must not overlap. */
+    int (*audio_open)(uint32_t period, uint32_t buffers);
+    int (*audio_submit)(const void *pcm, uint32_t bytes);
+    int (*audio_queued)(void);
+    void (*audio_close)(void);
 };
 
 /* Exported by the island. Runs the program on the given main stack and returns its exit status when the program
