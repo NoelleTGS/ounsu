@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LX_ABI_VERSION 1
+#define LX_ABI_VERSION 2
 
 /* Private syscall numbers (above Linux's range), used by the island runtime only. */
 #define LX_SYS_UNMAPSELF 0x10000 /* (base, size): unmap the calling thread's stack and end the thread */
@@ -31,6 +31,11 @@ struct lx_host {
     long (*clone)(int (*fn)(void *), void *stack, long flags, void *arg, int *ptid, void *tls, int *ctid);
     /* A log line from the island runtime itself (not the program's stdout). */
     void (*log)(const char *text, size_t len);
+
+    /* Vulkan (OunceVK), NULL when the host is built without it: the loader entry point (a wrapper that tracks open
+       instances and devices), and the console's default window for VK_NN_vi_surface (an NWindow *). */
+    void *(*vk_get_instance_proc_addr)(void *instance, const char *name);
+    void *vi_window;
 
     /* Image layout of the final .nro, for musl's static TLS (PT_TLS) and the unwinder (PT_GNU_EH_FRAME). */
     uintptr_t tls_image, tls_filesz, tls_memsz, tls_align;

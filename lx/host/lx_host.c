@@ -90,6 +90,10 @@ int main(int argc, char **argv) {
     host.syscall = lx_syscall;
     host.clone = lx_clone;
     host.log = island_log;
+#ifdef LX_VULKAN
+    host.vk_get_instance_proc_addr = lx_vk_get_instance_proc_addr;
+    host.vi_window = nwindowGetDefault();
+#endif
     host.text_start = (uintptr_t)__code_start;
     host.text_end = (uintptr_t)__rodata_start;
     host.data_start = (uintptr_t)__data_start;
@@ -130,6 +134,9 @@ int main(int argc, char **argv) {
     /* End every island thread, then give all island memory back: hbmenu (or the next program) runs in this same
        process. A paused thread never runs again, so freeing what it used is safe. */
     lx_threads_shutdown();
+#ifdef LX_VULKAN
+    lx_vulkan_destroy_leftovers(); /* hbmenu needs the GPU next */
+#endif
     size_t mapped = lx_mem_mapped();
     lx_mem_release_all();
     free(stack);

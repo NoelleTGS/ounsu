@@ -132,3 +132,13 @@ host (futex waits record their address, sleeps wait on a per-thread word, pipe r
 ends inside the host without returning to island code. A thread still running island code after 2 s would be paused
 (`svcSetThreadActivity`). Then all island memory is freed (aot-hello: 300 MiB, mostly the GC's reserved range). Result:
 "5 thread(s) ended, 0 paused".
+
+## 2026-11-13: Phase 3 step 1 passed: Vulkan from the island (Test 3)
+
+`probes/vk-island` (vulkan-clear moved into a musl island; every function from vkGetInstanceProcAddr, forwarded to
+OunceVK by the host's tracking wrapper `lx/host/lx_vulkan.c`; VK_NN_vi_surface on `lx_vi_window()`): GPU "Switch 2 GPU
+(NVK model 0x808)", Vulkan 1.4.0; default window surface **1280x720**, R8G8B8A8_UNORM (37), 3 images, FIFO;
+**304 frames in 5.01 s = 60.7 fps**, slowest 22.4 ms; everything destroyed (`0 open`), clean exit, hbmenu fine.
+Unlike nn's driver on HBLauncher, nothing special was needed (a UNORM swapchain presents). OunceVK keeps its shader
+cache at `sdmc:/config/ouncevk/shader-cache/`. The window size per console mode (Dusklight: 1080p handheld, 4K docked)
+is for later.

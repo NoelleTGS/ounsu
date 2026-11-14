@@ -56,3 +56,12 @@ interface dispatch, 2 GC.Collect, 3 ~200 MiB of allocation churn, 4 threads + [T
 5 throw/catch, 6 ThreadPool + Task, 7 System.Console. Success ends with `RESULT: all stages passed` and
 `lx: program exited with status 0`. If it dies, the last `stage` line says where; `lx: syscall N not implemented`
 lines show what the host is missing. **Passed 2026-11-13** (all stages, plus 6b: a delegate marshalled to native code; clean exit).
+
+## Test 3: vk-island (Phase 3 step 1: Vulkan from the island)
+
+Build: `sh probes/vk-island/build.sh`. Send `probes/vk-island/build/vk-island.nro` with nxlink.
+
+Expected: `lx-vk: vkCreateInstance (1 open)`, the GPU name and Vulkan version, the surface size, a swapchain line,
+then the screen cycles through colours for 5 seconds (like Test 0) and the program reports frames/fps (about 60) and
+its slowest frame. Afterwards every `lx-vk:` destroy line, `0 open`, and hbmenu should draw normally (it needs the
+GPU the program used).

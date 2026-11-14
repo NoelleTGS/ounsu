@@ -151,3 +151,66 @@ void lx_island_start(const struct lx_host *host, void *stack_lo, size_t stack_si
     island_log("lx-island: starting the program");
     lx_call_on_stack(run_libc, vector, vector);
 }
+
+/* ---- Vulkan and dynamic loading ---------------------------------------------------------------------------- */
+
+/* The loader entry point, as libvulkan exports it. Everything else comes from it (the host's wrapper keeps
+   vkGetInstanceProcAddr/vkGetDeviceProcAddr lookups going through itself). NULL results when the host has no Vulkan. */
+typedef void (*lx_vk_void_fn)(void);
+
+lx_vk_void_fn vkGetInstanceProcAddr(void *instance, const char *name) {
+    if (!g_host->vk_get_instance_proc_addr) return NULL;
+    return (lx_vk_void_fn)g_host->vk_get_instance_proc_addr(instance, name);
+}
+
+/* The console's default window (NWindow *) for VkViSurfaceCreateInfoNN.window. */
+void *lx_vi_window(void) {
+    return g_host->vi_window;
+}
+
+/* dlopen/dlsym for a static island: the only "library" is libvulkan (SDL and Veldrid look for it that way).
+   Lookups in it go through vkGetInstanceProcAddr with no instance, which serves vkGetInstanceProcAddr itself and the
+   global commands. RTLD_DEFAULT (NULL) lookups are answered the same way. */
+static int g_vulkan_handle;
+static const char *g_dlerror;
+
+static int name_is(const char *a, const char *b) {
+    while (*a && *a == *b) a++, b++;
+    return *a == *b;
+}
+
+static const char *base_name(const char *path) {
+    const char *b = path;
+    for (const char *p = path; *p; p++)
+        if (*p == '/') b = p + 1;
+    return b;
+}
+
+void *dlopen(const char *file, int mode) {
+    (void)mode;
+    if (!file) return &g_vulkan_handle; /* the program itself */
+    const char *b = base_name(file);
+    if (g_host->vk_get_instance_proc_addr &&
+        (name_is(b, "libvulkan.so.1") || name_is(b, "libvulkan.so") || name_is(b, "vulkan-1.dll")))
+        return &g_vulkan_handle;
+    g_dlerror = "lx: dlopen: no such library in the island";
+    return NULL;
+}
+
+void *dlsym(void *handle, const char *name) {
+    (void)handle;
+    void *p = name_is(name, "vkGetInstanceProcAddr") ? (void *)vkGetInstanceProcAddr : (void *)vkGetInstanceProcAddr(NULL, name);
+    if (!p) g_dlerror = "lx: dlsym: symbol not found";
+    return p;
+}
+
+int dlclose(void *handle) {
+    (void)handle;
+    return 0;
+}
+
+char *dlerror(void) {
+    const char *e = g_dlerror;
+    g_dlerror = NULL;
+    return (char *)e;
+}

@@ -57,6 +57,10 @@ long lx_getcwd(char *buf, size_t size);
 long lx_chdir(const char *path);
 long lx_statfs(void *out);
 
+/* lx_vulkan.c (hosts built with VULKAN=1) */
+void *lx_vk_get_instance_proc_addr(void *instance, const char *name);
+void lx_vulkan_destroy_leftovers(void);
+
 /* lx_thread.c */
 int lx_gettid(void);
 long lx_clone(int (*fn)(void *), void *stack, long flags, void *arg, int *ptid, void *tls, int *ctid);

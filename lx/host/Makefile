@@ -20,6 +20,8 @@ APP_AUTHOR ?= osu-kaihen
 APP_VERSION ?= 0.0.0
 OUT        ?= $(CURDIR)/build
 ICON       ?= $(DEVKITPRO)/libounce/default_icon.jpg
+# VULKAN=1: link OunceVK and hand Vulkan to the island (lx_vulkan.c).
+VULKAN     ?= 0
 # The island's "/" on the SD card.
 LX_ROOT    ?= sdmc:/switch/$(APP)
 
@@ -37,12 +39,25 @@ LDFLAGS := -specs=$(DEVKITPRO)/libounce/switch.specs -g $(ARCH) -Wl,--eh-frame-h
 LIBS    := -lnx
 
 SRCS := $(wildcard $(LXDIR)/host/*.c) $(wildcard $(LXDIR)/host/*.S)
+ifeq ($(VULKAN),1)
+CFLAGS  += -DLX_VULKAN
+LIBS    := -lvulkan -lnx
+else
+SRCS    := $(filter-out %/lx_vulkan.c,$(SRCS))
+endif
+# Objects depend on the flags too (VULKAN, LX_ROOT): rebuild when they change.
+FLAGS_STAMP := $(OUT)/obj/flags-$(shell echo '$(CFLAGS) $(LIBS)' | md5sum | cut -c1-12)
 OBJS := $(patsubst $(LXDIR)/host/%,$(OUT)/obj/%.o,$(SRCS))
 
 .PHONY: all clean
 all: $(OUT)/$(APP).nro
 
-$(OUT)/obj/%.c.o: $(LXDIR)/host/%.c $(wildcard $(LXDIR)/host/*.h) $(LXDIR)/include/lx_abi.h
+$(FLAGS_STAMP):
+	@mkdir -p $(dir $@)
+	@rm -f $(OUT)/obj/flags-*
+	@touch $@
+
+$(OUT)/obj/%.c.o: $(LXDIR)/host/%.c $(wildcard $(LXDIR)/host/*.h) $(LXDIR)/include/lx_abi.h $(FLAGS_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
