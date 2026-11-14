@@ -1,9 +1,0 @@
-{
-  "id": "gfx-probe",
-  "name": "GFX Probe",
-  "description": "osu! port test: Veldrid/Vulkan on the console display",
-  "display": "exclusive",
-  "sources": ["../shim/hbxl_vk_shim.c", "../obj/vk/vk_tramp.S", "../obj/vk/vk_names.c"],
-  "linux": {"code_base": "0x0c000000", "data_base": "0x10000000"},
-  "limits": {"heap_bytes": 65536, "stack_bytes": 1572864, "frames": 0}
-}

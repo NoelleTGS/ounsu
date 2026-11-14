@@ -18,6 +18,11 @@
 #define LX_MAIN_STACK (8u << 20)
 
 /* Where "/" of the island's file system is on the SD card (set per app by the Makefile's LX_ROOT). */
+#ifndef LX_WINDOW_W
+#define LX_WINDOW_W 1920
+#define LX_WINDOW_H 1080
+#endif
+
 #ifndef LX_ROOT
 #define LX_ROOT "sdmc:/switch/lx-root"
 #endif
@@ -91,8 +96,13 @@ int main(int argc, char **argv) {
     host.clone = lx_clone;
     host.log = island_log;
 #ifdef LX_VULKAN
+    /* The window is 1280x720 by default. A swapchain of another size presents as VK_SUBOPTIMAL_KHR, the program
+       (Veldrid) recreates it, and a second swapchain on the console's window fails (gfx-probe, 2026-11-13). Size the
+       window once, before anything is made: 1920x1080, the handheld screen's size and osu!'s fixed window. */
     host.vk_get_instance_proc_addr = lx_vk_get_instance_proc_addr;
     host.vi_window = nwindowGetDefault();
+    Result vrc = nwindowSetDimensions(nwindowGetDefault(), LX_WINDOW_W, LX_WINDOW_H);
+    lx_logf("lx: window %ux%u (0x%x)", LX_WINDOW_W, LX_WINDOW_H, vrc);
 #endif
     host.text_start = (uintptr_t)__code_start;
     host.text_end = (uintptr_t)__rodata_start;

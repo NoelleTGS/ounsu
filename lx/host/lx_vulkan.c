@@ -87,9 +87,10 @@ static VKAPI_ATTR void VKAPI_CALL lx_vkDestroyDevice(VkDevice device, const VkAl
 static VKAPI_ATTR VkResult VKAPI_CALL lx_vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *info,
                                                               const VkAllocationCallbacks *alloc, VkSwapchainKHR *out) {
     VkResult r = s_vkCreateSwapchainKHR(device, info, alloc, out);
-    lx_logf("lx-vk: vkCreateSwapchainKHR %ux%u format %d, %u images, present mode %d: %d (%d open)",
+    lx_logf("lx-vk: vkCreateSwapchainKHR %ux%u format %d, %u images, present mode %d%s: %d (%d open)",
             info->imageExtent.width, info->imageExtent.height, info->imageFormat, info->minImageCount,
-            info->presentMode, r, r == VK_SUCCESS ? ++s_swapchains : s_swapchains);
+            info->presentMode, info->oldSwapchain ? ", replacing one" : "", r,
+            r == VK_SUCCESS ? ++s_swapchains : s_swapchains);
     return r;
 }
 

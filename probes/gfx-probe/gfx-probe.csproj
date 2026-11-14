@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Graphics probe for the osu! port: Veldrid (ppy.Veldrid, as osu-framework uses)
-       on the console's Vulkan driver and vi window.  Build with ./build.sh. -->
+  <!-- Graphics probe for the osu! port: Veldrid (ppy.Veldrid, as osu-framework uses) on OunceVK
+       and the console's default window, in the lx island. Build with ./build.sh. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -31,10 +31,11 @@
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="134217728" />
     <RuntimeHostConfigurationOption Include="System.GC.RegionRange" Value="268435456" />
-    <!-- Resolved at link time: no dlopen on the console. libdl is hbxl_vk_shim.c. -->
+    <!-- Resolved at link time: no dlopen on the console. libdl is the island's fake one (lx/island),
+         "lx" the island runtime (lx_vi_window). -->
     <DirectPInvoke Include="libc" />
     <DirectPInvoke Include="libdl.so.2" />
     <DirectPInvoke Include="libdl" />
-    <DirectPInvoke Include="hbxl" />
+    <DirectPInvoke Include="lx" />
   </ItemGroup>
 </Project>

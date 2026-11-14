@@ -35,7 +35,11 @@ default**; nxlink is only a development log channel. Never design features aroun
     `lx/dotnet` (adrp-based thunk block + wraps), `lx/host/lx_fd.c`, read-only data → `.data.rel.ro` in the island,
     clean exit (threads woken and ended in the host, memory freed). Still open: GC activation emulation (pthread_kill is
     suppressed; a thread that never reaches a safepoint stalls the GC, as on hbxl), real memory use of the GC range.
-    Phase 3: Vulkan, audout, pad/hid, bsd sockets. Phase 4: osu-game nro + SD layout + clean exit. Phase 5 (faults →
+  - **Phase 3 in progress.** Done 2026-11-13: Vulkan from the island (Test 3, 60 fps), Veldrid on OunceVK (Test 4, all
+    stages; window fixed at 1920x1080 because swapchain recreation fails on the console's window). SDL decision: the
+    hbxl SDL3 stays in the island (host-side SDL would call managed code from non-island threads). Next: net-probe
+    (libnx sockets, DNS, OpenSSL), then input/audio entries in `struct lx_host`.
+    Phase 4: osu-game nro + SD layout + clean exit. Phase 5 (faults →
     managed exceptions) is parked: the loader never gets the exceptions.
 - HBLauncher-only material was left out of this repo on 2026-11-13: bti-probe, vfs-hosttest, the net host tests, the
   HBLauncher/ns2jb patches, the file-server/UDP/unplug tools, hbxl-env, hbxl_sb_input.c, symbolize.py, the generated

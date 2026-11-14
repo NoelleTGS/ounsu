@@ -6,11 +6,10 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using Veldrid;
 
-// Graphics probe for the osu! port: ppy.Veldrid (what osu-framework renders with) on the
-// console's Vulkan driver, presenting to HBLauncher's vi window.  Each stage logs before it
-// runs, so the last "stage N" line in the file-server log says where it stopped.
-// hbxl_vk_shim.c provides the Vulkan loader and maps the Wayland swapchain source onto
-// VK_NN_vi_surface.
+// Graphics probe for the osu! port: ppy.Veldrid (what osu-framework renders with) on OunceVK,
+// presenting to the console's default window. Each stage logs before it runs, so the last
+// "stage N" line in the nxlink log says where it stopped. lx/dotnet/lx_vk.c provides the
+// Vulkan loader and maps the Wayland swapchain source onto VK_NN_vi_surface.
 
 [StructLayout(LayoutKind.Sequential)]
 struct Vertex
@@ -25,7 +24,7 @@ static unsafe partial class Program
     [LibraryImport("libc", EntryPoint = "write")]
     private static partial nint write(int fd, byte* buf, nint count);
 
-    [LibraryImport("hbxl", EntryPoint = "hbx_switch2_vi_window")]
+    [LibraryImport("lx", EntryPoint = "lx_vi_window")]
     private static partial nint ViWindow();
 
     static void Log(string s)
@@ -64,7 +63,7 @@ static unsafe partial class Program
         Log($"stage 1: vi window 0x{window:x}");
         if (window == 0)
         {
-            Log("FAILED: no vi window (manifest must say \"display\": \"exclusive\")");
+            Log("FAILED: no vi window (host built without VULKAN=1?)");
             return 2;
         }
 
@@ -157,7 +156,7 @@ static unsafe partial class Program
             Log("stage 7: EXCEPTION " + e);
         }
 
-        Log("stage 6: dispose everything (the launcher takes its display back)");
+        Log("stage 6: dispose everything (hbmenu needs the GPU next)");
         pipeline.Dispose();
         vs.Dispose();
         fs.Dispose();

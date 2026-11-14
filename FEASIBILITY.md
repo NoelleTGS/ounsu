@@ -142,3 +142,35 @@ OunceVK by the host's tracking wrapper `lx/host/lx_vulkan.c`; VK_NN_vi_surface o
 Unlike nn's driver on HBLauncher, nothing special was needed (a UNORM swapchain presents). OunceVK keeps its shader
 cache at `sdmc:/config/ouncevk/shader-cache/`. The window size per console mode (Dusklight: 1080p handheld, 4K docked)
 is for later.
+
+## 2026-11-13: SDL decision: the HBLauncher-built SDL3 stays inside the island
+
+Option (b), Dusklight's Switch 2 SDL3 in the host, fails on threads: SDL's audio thread and event/hint callbacks would
+call managed code from host threads, which have no musl thread pointer and no .NET thread registration. In the island
+every SDL thread is an island thread. So: the hbxl SDL3 (offscreen video + hbx drivers, `src/native/SDL` with
+`patches/SDL.diff`, unmodified) is linked into the island. Its only non-libc imports are `hbx_input_poll`, `hbxl_ctx`,
+`hbxl_sdk_memalign` and `hbxl_sdk_free`, which the island provides. Input (pad, touch, keyboard, mouse, six-axis) and
+audio output come from the host through plain C entries in `struct lx_host`, backed by libnx hid and audout. This also
+covers the Joy-Con 2 mouse idea.
+
+## 2026-11-13: Phase 3 step 2 passed: Veldrid on OunceVK (Test 4)
+
+`probes/gfx-probe` (ppy.Veldrid, as osu-framework uses it; island built with `aot-island.py --vulkan`, host with
+VULKAN=1): every stage. Swapchain 1920x1080 R8G8B8A8_UNORM, clears 16.45 ms/frame, triangle 16.66 ms/frame (60 fps,
+FIFO), texture upload/readback, offscreen and textured draws, 192 MiB of ballast textures, and all osu-framework-like
+draws (depth LessEqual, UBO set 0 + texture set 1, scissor, alpha blend) with the right pixels. Clip Y inverted, depth
+0..1, UBO alignment 64.
+
+- **Swapchain recreation fails on the console's window**, both ways: new swapchain with oldSwapchain then destroying
+  the old one (acquire fails), and old destroyed first (VK_ERROR_SURFACE_LOST_KHR). libounce's native_window.h:
+  "One producer presents to the layer at a time ... the previous one unregisters the layer's image ... and waits for
+  its releases". Veldrid recreated because its 1920x1080 swapchain on the default 1280x720 window presented
+  VK_SUBOPTIMAL_KHR. **Fix: the host sizes the window to 1920x1080 before anything is made** (`nwindowSetDimensions`).
+  If osu! ever recreates its swapchain, keep the one swapchain (as HBLauncher did).
+- None of HBLauncher's nn-driver workarounds were needed (UNORM swapchain presents correctly, no gamma issue).
+- `lx/dotnet/lx_vk.c` keeps the lazy trampolines (785 commands) and the Wayland->vi translation, and logs failed
+  acquires/presents. The island's fake libdl is general now (Vulkan; OpenSSL and FFmpeg tables via weak symbols).
+- Teardown printed `MESA: warning: GPU retirement after the last instance: status 0x104`; everything was destroyed.
+  Watch whether hbmenu ever lacks its GPU after a run.
+- For later (libounce native_window.h): `nwindowSetModeDimensions` (per-mode size, e.g. 4K docked) and
+  `nwindowSetFrameRates` (120 Hz on the handheld screen, VRR): osu! at 120 fps handheld.

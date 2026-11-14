@@ -168,39 +168,78 @@ void *lx_vi_window(void) {
     return g_host->vi_window;
 }
 
-/* dlopen/dlsym for a static island: the only "library" is libvulkan (SDL and Veldrid look for it that way).
-   Lookups in it go through vkGetInstanceProcAddr with no instance, which serves vkGetInstanceProcAddr itself and the
-   global commands. RTLD_DEFAULT (NULL) lookups are answered the same way. */
-static int g_vulkan_handle;
-static const char *g_dlerror;
+/* ---- the fake libdl -----------------------------------------------------------------------------------------
 
-static int name_is(const char *a, const char *b) {
+   A static island has no shared libraries, but .NET and its libraries look for some by name and dlsym() their
+   functions: libvulkan (SDL, Veldrid's bindings), libssl/libcrypto (System.Security.Cryptography.Native.OpenSsl),
+   FFmpeg's libraries (FFmpeg.AutoGen). Each is served from what is linked in:
+   - Vulkan through lx_vk_dlsym (lx/dotnet/lx_vk.c: lazy trampolines, needed because Veldrid's bindings dlsym every
+     command before an instance exists); without it, straight from vkGetInstanceProcAddr (global commands only).
+   - OpenSSL and FFmpeg from sorted symbol tables generated at build time (lx_ssl_syms, lx_ffmpeg_syms).
+   The defaults below are weak definitions that the real ones replace in the island link. */
+struct lx_dl_sym {
+    const char *name;
+    void *addr;
+};
+
+static int str_eq(const char *a, const char *b) {
     while (*a && *a == *b) a++, b++;
     return *a == *b;
 }
 
-static const char *base_name(const char *path) {
-    const char *b = path;
-    for (const char *p = path; *p; p++)
-        if (*p == '/') b = p + 1;
-    return b;
+__attribute__((weak)) void *lx_vk_dlsym(const char *name) {
+    return str_eq(name, "vkGetInstanceProcAddr") ? (void *)vkGetInstanceProcAddr : (void *)vkGetInstanceProcAddr(NULL, name);
+}
+__attribute__((weak)) const struct lx_dl_sym lx_ssl_syms[1];
+__attribute__((weak)) const unsigned lx_ssl_count;
+__attribute__((weak)) const struct lx_dl_sym lx_ffmpeg_syms[1];
+__attribute__((weak)) const unsigned lx_ffmpeg_count;
+
+static int g_dl_handles[4]; /* addresses only: 0 the program, 1 Vulkan, 2 OpenSSL, 3 FFmpeg */
+static const char *g_dlerror;
+
+static int contains(const char *s, const char *sub) {
+    for (; *s; s++) {
+        const char *a = s, *b = sub;
+        while (*a && *b && *a == *b) a++, b++;
+        if (!*b) return 1;
+    }
+    return 0;
+}
+
+static void *table_lookup(const struct lx_dl_sym *tab, unsigned n, const char *name) {
+    unsigned lo = 0, hi = n; /* sorted by strcmp */
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        const char *a = name, *b = tab[mid].name;
+        while (*a && *a == *b) a++, b++;
+        int c = (unsigned char)*a - (unsigned char)*b;
+        if (!c) return tab[mid].addr;
+        if (c < 0) hi = mid;
+        else lo = mid + 1;
+    }
+    return NULL;
 }
 
 void *dlopen(const char *file, int mode) {
     (void)mode;
-    if (!file) return &g_vulkan_handle; /* the program itself */
-    const char *b = base_name(file);
-    if (g_host->vk_get_instance_proc_addr &&
-        (name_is(b, "libvulkan.so.1") || name_is(b, "libvulkan.so") || name_is(b, "vulkan-1.dll")))
-        return &g_vulkan_handle;
+    g_dlerror = NULL;
+    if (!file) return &g_dl_handles[0];
+    if (contains(file, "vulkan") && g_host->vk_get_instance_proc_addr) return &g_dl_handles[1];
+    if ((contains(file, "libssl") || contains(file, "libcrypto")) && lx_ssl_count) return &g_dl_handles[2];
+    if ((contains(file, "libavcodec") || contains(file, "libavformat") || contains(file, "libavutil") ||
+         contains(file, "libswresample") || contains(file, "libswscale")) && lx_ffmpeg_count)
+        return &g_dl_handles[3];
     g_dlerror = "lx: dlopen: no such library in the island";
     return NULL;
 }
 
 void *dlsym(void *handle, const char *name) {
-    (void)handle;
-    void *p = name_is(name, "vkGetInstanceProcAddr") ? (void *)vkGetInstanceProcAddr : (void *)vkGetInstanceProcAddr(NULL, name);
-    if (!p) g_dlerror = "lx: dlsym: symbol not found";
+    void *p = NULL;
+    if (handle == &g_dl_handles[1]) p = lx_vk_dlsym(name);
+    else if (handle == &g_dl_handles[2]) p = table_lookup(lx_ssl_syms, lx_ssl_count, name);
+    else if (handle == &g_dl_handles[3]) p = table_lookup(lx_ffmpeg_syms, lx_ffmpeg_count, name);
+    g_dlerror = p ? NULL : "lx: dlsym: symbol not found";
     return p;
 }
 

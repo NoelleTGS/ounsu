@@ -65,3 +65,14 @@ Expected: `lx-vk: vkCreateInstance (1 open)`, the GPU name and Vulkan version, t
 then the screen cycles through colours for 5 seconds (like Test 0) and the program reports frames/fps (about 60) and
 its slowest frame. Afterwards every `lx-vk:` destroy line, `0 open`, and hbmenu should draw normally (it needs the
 GPU the program used).
+
+## Test 4: gfx-probe (Phase 3 step 2: Veldrid on OunceVK)
+
+Build: `sh probes/gfx-probe/build.sh`. Send `probes/gfx-probe/build/gfx-probe.nro` with nxlink.
+
+Stages: 0 managed Main, 1 the vi window, 2 Veldrid GraphicsDevice.CreateVulkan (Wayland source mapped to
+VK_NN_vi_surface; swapchain size and format), 3 120 frames of clears (ms/frame), 4 buffers + SPIR-V shaders + a
+pipeline, 5 300 frames of a spinning triangle (visible on screen), 7a-7g GPU readback (texture upload, offscreen
+draws, 192 MiB of ballast textures), 8a-8g osu-framework-like draws (depth, UBOs, texture sets, scissor, blending:
+each line says ok or the wrong pixel), 6 dispose. Ends with `RESULT: all stages passed` and the host's Vulkan objects
+back at `0 open`. **Passed 2026-11-13** (all stages, 60 fps; after the host fixed the window at 1920x1080).
