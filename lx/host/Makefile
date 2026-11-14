@@ -1,6 +1,7 @@
 # Builds a .nro from the lx host and one island object.
 #
-#   make -C lx/host ISLAND=/path/island.o APP=hello OUT=/path/outdir [APP_TITLE="..."] [ICON=file.jpg] [LX_ROOT=...]
+#   make -C lx/host ISLAND=/path/island.o APP=hello OUT=/path/outdir [APP_TITLE="..."] [APP_AUTHOR="..."]
+#        [APP_VERSION=x.y.z] [ICON=file.jpg (256x256 JPEG)] [LX_ROOT=...]
 #
 # The island comes from tools/make-island.sh. DEVKITPRO defaults to /opt/devkitpro.
 
@@ -70,6 +71,8 @@ $(OUT)/obj/%.S.o: $(LXDIR)/host/%.S
 $(OUT)/$(APP).elf: $(OBJS) $(ISLAND)
 	$(CC) $(LDFLAGS) $(OBJS) $(ISLAND) $(LIBS) -o $@
 
+# Remade every time: title, author and version come from the command line.
+.PHONY: $(OUT)/$(APP).nacp
 $(OUT)/$(APP).nacp:
 	@mkdir -p $(OUT)
 	$(TOOLS)/nacptool --create "$(APP_TITLE)" "$(APP_AUTHOR)" "$(APP_VERSION)" $@

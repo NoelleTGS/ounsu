@@ -65,6 +65,18 @@ OSU_RESOURCES_DIR=/osu-resources
 EOF
 # LX_ENV_EXTRA: extra lines for a test build (e.g. LX_ENV_EXTRA="LX_TRACE=1").
 if [ -n "${LX_ENV_EXTRA:-}" ]; then printf '%s\n' $LX_ENV_EXTRA >> obj/romfs/lx-env; fi
-make -s -C "$ROOT/lx/host" ISLAND="$HERE/build/island.o" APP=osu APP_TITLE="osu!" OUT="$HERE/build" VULKAN=1 \
-    ROMFS="$HERE/obj/romfs"
+# The .nro's hbmenu entry. The version is the port's own (osu-game's assembly version stays 0.0.0, see CLAUDE.md).
+# The icon is osu!'s lazer icon from the osu checkout, made at build time: no osu! artwork is tracked in this repo.
+NRO_AUTHOR="NoelleTGS"
+NRO_VERSION="0.1.0"
+ICON_SRC="$ROOT/src/osu/assets/lazer.png"
+ICON_ARGS=""
+if [ -f "$ICON_SRC" ] && command -v magick >/dev/null 2>&1; then
+    magick "$ICON_SRC" -background black -alpha remove -resize 256x256 -quality 95 obj/icon.jpg
+    ICON_ARGS="ICON=$HERE/obj/icon.jpg"
+else
+    echo "build.sh: no $ICON_SRC or no ImageMagick: the .nro gets libounce's default icon"
+fi
+make -s -C "$ROOT/lx/host" ISLAND="$HERE/build/island.o" APP=osu APP_TITLE="osu!" APP_AUTHOR="$NRO_AUTHOR" \
+    APP_VERSION="$NRO_VERSION" $ICON_ARGS OUT="$HERE/build" VULKAN=1 ROMFS="$HERE/obj/romfs"
 ls -la "$HERE/build/osu.nro"

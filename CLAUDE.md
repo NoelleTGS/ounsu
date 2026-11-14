@@ -131,7 +131,7 @@ NativeAOT). The nn::hid / six-axis / keyboard **SDK offsets** were for SmileBASI
   order, PR #6002 audio via SDL3 + mysoundlib + FFmpeg), osu `HBXL_*` defines (settings section, hubs, notification
   connector null fix, build-date assembly versions).
 - **Build gotchas:** `-p:HbxlBuild=true` must be on the dotnet command line (a global property), otherwise the framework
-  patches silently vanish. osu-game's assembly version must stay **0.0.0** (1.0.0 = "deployed" build: legacy score
+  patches silently vanish. osu-game's assembly version must stay **0.0.0** (the .nro's own version, author and icon are set in `console/osu-game/build.sh`: NRO_VERSION) (1.0.0 = "deployed" build: legacy score
   JSON, Sentry reports to ppy). Linking real `-lstdc++` needs NativeAOT's `libstdc++compat.a` dropped.
 - **NativeAOT + JSON:** `rd.xml` from `tools/gen-rdxml` (build.sh regenerates it); `OSU_HBXL_JSON_SELFTEST=1`.
 - **Metadata hub:** `HbxlMessagePackHubProtocol` + `HbxlHubTypes` (stock SignalR protocol needs expression trees);

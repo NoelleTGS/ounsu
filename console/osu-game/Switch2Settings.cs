@@ -111,8 +111,8 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
         SetDefault(Switch2Setting.FrameRate, FRAME_RATE[0]);
 
         // The audio queue and the diagnostics keep their hbxl-env lines, which are the defaults here.
-        SetDefault(Switch2Setting.AudioPeriod, envInt("HBXL_AUDIO_PERIOD", 128, 64, 1024), 64, 1024);
-        SetDefault(Switch2Setting.AudioBuffers, envInt("HBXL_AUDIO_BUFFERS", 2, 2, 16), 2, 16);
+        SetDefault(Switch2Setting.AudioPeriod, envInt("HBXL_AUDIO_PERIOD", 128, 16, 1024), 16, 1024);
+        SetDefault(Switch2Setting.AudioBuffers, envInt("HBXL_AUDIO_BUFFERS", 2, 1, 16), 1, 16);
 
         // HBXL_GC_LOG: unset = every collection, 0 = off, N = only pauses of N ms and longer.
         string? gcLog = env("HBXL_GC_LOG");

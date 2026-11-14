@@ -56,7 +56,7 @@ void lx_audio_close(void) {
 
 int lx_audio_open(uint32_t period, uint32_t buffers) {
     if (g_open) lx_audio_close();
-    if (period < 32 || buffers < 2 || buffers > MAX_BUFFERS) return -LX_EINVAL;
+    if (period < 16 || buffers < 1 || buffers > MAX_BUFFERS) return -LX_EINVAL;
     g_bytes = period * FRAME_BYTES;
     g_cap = (g_bytes + 0xFFF) & ~0xFFFu;
 

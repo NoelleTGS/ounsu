@@ -10,8 +10,8 @@
  * Ported from HBLauncher's hbxl_audio_out.c (which drove nn::audio AudioOut at SDK offsets). Environment (lx-env;
  * osu!'s "Switch 2" settings override period and count through hbxl_audio_set_queue, which also reopens a running
  * output):
- *   LX_AUDIO_PERIOD=<frames>   frames per buffer, 64..1024 (default 128 = 2.7 ms)
- *   LX_AUDIO_BUFFERS=<n>       buffers queued, 2..16 (default 3)  -> latency ~ period x buffers (default 8 ms)
+ *   LX_AUDIO_PERIOD=<frames>   frames per buffer, 16..1024 (default 128 = 2.7 ms)
+ *   LX_AUDIO_BUFFERS=<n>       buffers queued, 1..16 (default 3)  -> latency ~ period x buffers (default 8 ms)
  *   LX_AUDIO_SDL=1             don't take over: SDL's own driver (dummy: silence)
  * A GC pause longer than the queue makes a short dropout (silence, no added latency); raise the period or count if
  * crackles bother you more than delay.
@@ -176,8 +176,8 @@ static bool start_thread(void) {
  */
 int hbxl_audio_set_queue(int period, int buffers) {
     int result = 0;
-    period = period < 64 ? 64 : period > MAX_PERIOD ? MAX_PERIOD : period;
-    buffers = buffers < 2 ? 2 : buffers > MAX_BUFFERS ? MAX_BUFFERS : buffers;
+    period = period < 16 ? 16 : period > MAX_PERIOD ? MAX_PERIOD : period;
+    buffers = buffers < 1 ? 1 : buffers > MAX_BUFFERS ? MAX_BUFFERS : buffers;
 
     pthread_mutex_lock(&g_lock);
     g.set_period = period;
@@ -213,8 +213,8 @@ static SDL_AudioStream *open_stream(SDL_AudioDeviceID devid, const SDL_AudioSpec
         return __real_SDL_OpenAudioDeviceStream(devid, spec, callback, userdata);
     }
 
-    g.period = g.set_period ? g.set_period : env_int("LX_AUDIO_PERIOD", 128, 64, MAX_PERIOD);
-    g.buffers = g.set_buffers ? g.set_buffers : env_int("LX_AUDIO_BUFFERS", 3, 2, MAX_BUFFERS);
+    g.period = g.set_period ? g.set_period : env_int("LX_AUDIO_PERIOD", 128, 16, MAX_PERIOD);
+    g.buffers = g.set_buffers ? g.set_buffers : env_int("LX_AUDIO_BUFFERS", 3, 1, MAX_BUFFERS);
 
     const SDL_AudioSpec out = { SDL_AUDIO_S16LE, 2, OUT_RATE };
     SDL_AudioStream *stream = SDL_CreateAudioStream(spec, &out);
