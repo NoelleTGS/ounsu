@@ -44,11 +44,11 @@ default**; nxlink is only a development log channel. Never design features aroun
     mouse, **Joy-Con 2 mouse** via libounce PadPointer; `lx/host/lx_input.c` + `console/osu-game/shim/lx_input.c`,
     ABI 4). hbmenu's netloader saves each sent .nro as `sdmc:/switch/osu.nro`; launching that from hbmenu runs the
     PREVIOUS build. **Next, in order:**
-    1. Audio: port `hbxl_audio_out.c` onto libnx audout via a host entry; drop SDL_AUDIO_DRIVER=dummy and
-       OSU_HBXL_NO_AUDIO from the romfs lx-env.
-    2. Port `hbxl_gc_timing.c`'s pressure-GC downgrade (gen2 -> gen1); consider OptimizationPreference=Speed (the
-       Size setting was for hbxl's 240 MiB SDK heap); exit/relaunch back to hbmenu; the docked/4K window and 120 Hz.
-    3. Later (user's wish): USB drawing tablets.
+    Also done 2026-11-14: **audio** (ABI 5, `lx/host/lx_audio.c` + `shim/lx_audio_out.c`: no crackles, almost no
+    latency), the pressure-GC downgrade (`shim/lx_gc.c`), and a **clean exit back to hbmenu** (run 14).
+    1. Consider OptimizationPreference=Speed (the Size setting was for hbxl's 240 MiB SDK heap); the docked/4K window
+       and 120 Hz handheld (libounce nwindowSetModeDimensions / nwindowSetFrameRates); play-test a map.
+    2. Later (user's wish): USB drawing tablets.
   - **Workflow:** `sh console/osu-game/build.sh` (~15 min, ILC) or `LX_SKIP_PUBLISH=1 sh console/osu-game/build.sh`
     (relink, ~70 s). Claude sends builds itself so the log can be read: `nxlink -s -a 192.168.1.177 <nro> >
     logs/<name>.log 2>&1` in the background (the user puts hbmenu in netloader mode with Y), plus a Monitor on the log.

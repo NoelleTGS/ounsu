@@ -195,6 +195,8 @@ int main(int argc, char **argv) {
     /* End every island thread, then give all island memory back: hbmenu (or the next program) runs in this same
        process. A paused thread never runs again, so freeing what it used is safe. */
     lx_threads_shutdown();
+    lx_audio_close();
+    lx_input_shutdown();
 #ifdef LX_VULKAN
     lx_vulkan_destroy_leftovers(); /* hbmenu needs the GPU next */
 #endif

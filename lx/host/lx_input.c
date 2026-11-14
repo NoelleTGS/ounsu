@@ -184,3 +184,13 @@ void lx_input_poll(struct lx_input *out, uint32_t flags) {
     if (flags & LX_INPUT_KBMOUSE) kbmouse_read(out);
     if (flags & LX_INPUT_POINTER) pointer_read(out);
 }
+
+/* At exit: hbmenu (or the next program) runs in this same process, so give back what lx_input_poll started. */
+void lx_input_shutdown(void) {
+    for (int i = 0; i < g_gyro_count; i++) hidStopSixAxisSensor(g_gyro[i]);
+    g_gyro_count = 0;
+    g_gyro_state = 0;
+    if (g_pointer_state == 1) padPointerExit(&g_pointer);
+    g_pointer_state = 0;
+    g_ready = 0;
+}

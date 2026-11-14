@@ -250,3 +250,21 @@ empty and osu! never got past its database. What the runs found, in order:
   `input_poll(struct lx_input *, flags)` entry (ABI 4). Island: `console/osu-game/shim/lx_input.c` wraps
   SDL_PumpEvents and pushes SDL events (the HBLauncher mapping, minus its SDK offsets and watchdog).
 - The first ShadowCast frame after opening the device can be black even with `select=gte(n,10)`: take a second one.
+
+## 2026-11-14: audio, GC downgrade, clean exit (runs 11-14)
+
+- **Audio (run 11, user-tested: no crackles, almost no latency):** ABI 5 adds audio_open/submit/queued/close
+  (`lx/host/lx_audio.c`, plain libnx audout: works on kaiHEN as in Kaizhar). `shim/lx_audio_out.c` takes over
+  mysoundlib's device stream like hbxl_audio_out.c did; default 3 x 128 frames (8 ms), the Switch 2 settings set it
+  (the user's saved 2 x 128 = 5.3 ms also played clean). The dropout counter counted sub-millisecond "gaps" ~25 times
+  a second (the estimate counts the playing buffer whole): it now ignores gaps under 1 ms.
+- **GC:** `shim/lx_gc.c`: AddMemoryPressure's gen2 runs as gen1 ("induced gen 1" in the log). Pauses 2-30 ms with
+  suspension in microseconds (hbxl: 25-35 ms typical, pressure gen2s up to 312 ms).
+- **Exit (runs 12-14):** osu!'s teardown and the island's exit were already clean; the host died in its Vulkan
+  leftover cleanup. osu-framework leaves its device, swapchain, surface and instance open, and (1) the host destroyed
+  the device under a live swapchain, (2) the host's real destroy functions were NULL: they are learned when the island
+  first looks them up, and osu! never destroys its device. Now swapchains -> device -> surfaces -> instance, with
+  missing functions resolved at exit. The host also closes audout and releases the Joy-Con 2 mouse and six-axis
+  sensors. **hbmenu comes back and launches the next program** (run 14). Still printed: `MESA: warning: GPU
+  retirement after the last instance: status 0x102` (harmless so far).
+- Undocking drops the ethernet and with it the nxlink log; the game keeps running.
