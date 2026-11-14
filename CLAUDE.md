@@ -49,8 +49,11 @@ default**; nxlink is only a development log channel. Never design features aroun
     Joy-Con mouse per side (ABI 6, runs 15-16): the host reads hid Nmouse itself (not PadPointer, whose `active` is
     always set); a Joy-Con on a surface (Nmouse flag bit 1) is a mouse whose stick only scrolls, otherwise a
     controller. Setting Off/Left/Right/Both + sensitivity.
-    1. Consider OptimizationPreference=Speed (the Size setting was for hbxl's 240 MiB SDK heap); the docked/4K window
-       and 120 Hz handheld (libounce nwindowSetModeDimensions / nwindowSetFrameRates). Maps play fine (user, 2026-11-14).
+    **Resolution per console mode + 120 Hz done** (ABI 7, run 17): `lx/host/lx_display.c`, Switch 2 -> Display
+    settings, live swapchain recreation on dock/undock and setting changes (FEASIBILITY.md 2026-11-14). The host now
+    pumps `appletMainLoop` (in `display_get`); HOME menu / exit request behaviour not yet tested.
+    1. Consider OptimizationPreference=Speed (the Size setting was for hbxl's 240 MiB SDK heap). Maps play fine (user,
+       2026-11-14).
     2. Later (user's wish): USB drawing tablets.
   - **Workflow:** `sh console/osu-game/build.sh` (~15 min, ILC) or `LX_SKIP_PUBLISH=1 sh console/osu-game/build.sh`
     (relink, ~70 s). Claude sends builds itself so the log can be read: `nxlink -s -a 192.168.1.177 <nro> >
@@ -58,7 +61,8 @@ default**; nxlink is only a development log channel. Never design features aroun
     nxlink is not on PATH: use `/opt/devkitpro/tools/bin/nxlink`. A previous nxlink still running holds the stdio
     port ("bind listen socket: Address already in use": the game runs without a log): kill it before sending. nxlink
     prints "exiting ..." whenever the connection drops (crash, exit, or the user undocking, which cuts the ethernet);
-    a crash shows no `lx: program exited` line. `LX_TRACE=1` in `sdmc:/switch/osu/lx-env` (or the romfs lx-env, via
+    a crash shows no `lx: program exited` line. `LX_LOG_FILE=/lx-last.log` in lx-env copies the log to the card
+    (for undocked runs). The ShadowCast shows black at 1440p/120 Hz: set the docked resolution to 1080p and 60 fps to capture. `LX_TRACE=1` in `sdmc:/switch/osu/lx-env` (or the romfs lx-env, via
     `LX_ENV_EXTRA="LX_TRACE=1"` on build.sh) logs every syscall. Files onto the card:
     `tools/ftp-upload.py` with ounceshell's FTP server. The native libraries come from `~/osu-HBLauncher/src/native`
     (musl builds, `LX_NATIVE_BUILDS`), except OpenSSL and FFmpeg (this repo's src/native). On the card:
