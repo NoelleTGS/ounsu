@@ -57,6 +57,11 @@ int lx_fd_poll_state(int fd, int events);
 long lx_getcwd(char *buf, size_t size);
 long lx_chdir(const char *path);
 long lx_statfs(void *out);
+void *lx_fd_map_shared(int fd, uint64_t len, uint64_t off, long *err);
+int lx_fd_unmap_shared(uintptr_t addr);
+long lx_fd_remap_shared(uintptr_t addr, uint64_t new_len);
+long lx_fd_msync(uintptr_t addr);
+long lx_fd_read_at(int fd, void *buf, uint64_t len, uint64_t off);
 
 /* lx_net.c */
 long lx_socket(int domain, int type, int protocol);

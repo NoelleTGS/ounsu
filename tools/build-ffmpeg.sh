@@ -1,25 +1,27 @@
 #!/bin/sh
-# Static FFmpeg 7.1.1 (matches FFmpeg.AutoGen 7.1.1) for hbxl, audio only.
+# Static FFmpeg 7.1.1 (matches FFmpeg.AutoGen 7.1.1) for the lx island, audio only.
 # Source: git clone --depth 1 --branch n7.1.1 https://github.com/FFmpeg/FFmpeg.git src/native/ffmpeg
-# Output: src/native/ffmpeg/build-hbx/lib{avformat,avcodec,swresample,avutil}.a (+ include/)
-# hbxl_vk_shim.c's dlopen("libavcodec.so.61" ...) resolves names through obj/ffmpeg_syms.c
-# (gen-ssl-syms.py), so FFmpeg.AutoGen's DynamicallyLoadedBindings work unchanged.
-#   build-ffmpeg-hbx.sh desktop  → the same configuration as shared x86_64 libs in build-desktop/lib
+# Output: src/native/ffmpeg/build-lx/lib{avformat,avcodec,swresample,avutil}.a (+ include/)
+# The island's fake libdl answers dlopen("libavcodec.so.61" ...) from obj/ffmpeg_syms.c (tools/gen-ssl-syms.py), so
+# FFmpeg.AutoGen's DynamicallyLoadedBindings work unchanged.
+# Position-independent (--enable-pic): the .nro is a PIE, and FFmpeg's NEON assembly built without PIC has absolute
+# addresses in its code, which libounce's link refuses (text relocations). The HBLauncher build was --disable-pic.
+#   build-ffmpeg.sh desktop  → the same configuration as shared x86_64 libs in build-desktop/lib
 #   (libavcodec.so.61 ...) for the desktop comparison build: LD_LIBRARY_PATH=src/native/ffmpeg/build-desktop/lib
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TC=${HBXL_TOOLCHAIN:-$ROOT/toolchain-src/toolchain}
+TC=${LX_MUSL_TOOLCHAIN:-$HOME/osu-HBLauncher/toolchain-src/toolchain}
 SRC="$ROOT/src/native/ffmpeg"
-if [ "$1" = desktop ]; then
+if [ "${1:-}" = desktop ]; then
   OUT="$SRC/build-desktop"
   set -- --enable-shared --disable-static
 else
-  OUT="$SRC/build-hbx"
+  OUT="$SRC/build-lx"
   set -- --enable-cross-compile --arch=aarch64 --target-os=linux \
     --cross-prefix="$TC/bin/aarch64-linux-musl-" \
     --sysroot="$TC/aarch64-linux-musl" \
-    --extra-cflags="-mbranch-protection=bti -fno-pie -fno-pic -ffunction-sections -fdata-sections -DHBX_SWITCH2=1" \
-    --enable-static --disable-shared --disable-pic
+    --extra-cflags="-fPIE -ffunction-sections -fdata-sections" \
+    --enable-static --disable-shared --enable-pic
 fi
 mkdir -p "$OUT/obj"
 cd "$OUT/obj"

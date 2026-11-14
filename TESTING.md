@@ -87,3 +87,11 @@ Stages: 0 CSPRNG + clock, 1 blocking TCP, 2 DNS (console resolver), 3 async sock
 5 HTTPS with chain build, 6 10 concurrent HTTPS, 7 downloads (20 MiB HTTP to the SD card, 4 MiB HTTPS),
 8 WebSocket echo, 9 timeout/cancellation, 10 connection refused, 11 40 sockets at once, 12 one HTTPS GET to osu.ppy.sh
 (the only request to ppy's servers). Ends with `done: N passed, M failed`. **Passed 2026-11-13** (13/13).
+
+## Test 6: osu! on kaiHEN (Phase 4, first run: no input, no audio)
+
+Needs `osu-resources` on the SD card at `/switch/osu/osu-resources` (once: `python3 tools/ftp-upload.py
+fsroot/osu-resources sdmc:/switch/osu/osu-resources` with ounceshell's FTP server running; done 2026-11-14).
+Build: `sh console/osu-game/build.sh` (`LX_SKIP_PUBLISH=1` relinks without recompiling osu!). Send
+`console/osu-game/build/osu.nro` (168 MB) with nxlink. Fresh osu! data (first-run setup), silent audio, input not wired
+yet. The goal of the first runs: get to osu!'s intro and main menu, collect the syscalls/paths that fail.

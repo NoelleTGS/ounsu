@@ -18,6 +18,12 @@ if data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
 
 shoff, = struct.unpack_from("<Q", data, 0x28)
 shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x3A)
+if shnum == 0 or shstrndx == 0xFFFF:  # more than 65535 sections: the real values are in section header 0
+    _sh0 = struct.unpack_from("<IIQQQQIIQQ", data, shoff)
+    shnum = shnum or _sh0[5]
+    shstrndx = _sh0[6] if shstrndx == 0xFFFF else shstrndx
+if shnum == 0:
+    sys.exit("svc-scan: no sections")
 sections = []
 for i in range(shnum):
     name, stype, flags, addr, off, size, link, info, align, entsize = struct.unpack_from(

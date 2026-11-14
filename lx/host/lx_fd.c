@@ -259,8 +259,11 @@ static void pipe_release(struct pipe_buf *p, int writer) {
     }
 }
 
+static void shm_detach(struct fd *f);
+
 void fd_free(struct fd *f) {
     if (--f->refs > 0) return;
+    if (f->shm) shm_detach(f);
     if (f->kind == FD_FILE && f->host_fd >= 0) close(f->host_fd);
     if (f->kind == FD_DIR && f->dir) closedir(f->dir);
     if (f->kind == FD_PIPE_R || f->kind == FD_PIPE_W) pipe_release(f->pipe, f->kind == FD_PIPE_W);
@@ -277,6 +280,232 @@ void lx_fd_setup_console(void) {
         f->host_fd = i;
         g_fds[i] = f;
     }
+}
+
+/* ---- shared file mappings (MAP_SHARED), for Realm --------------------------------------------------------------
+
+   Heap memory can't be placed at a chosen address or aliased, so a file mapped MAP_SHARED gets ONE buffer holding the
+   whole file: every mapping of it returns buffer + offset (so mappings alias each other, as pages would), and read,
+   write, ftruncate, lseek and fstat of the file go through the same buffer while it exists. It is written back to the
+   SD card on msync/fsync and when the last mapping and descriptor are gone. It can't grow in place, so it reserves
+   room up front (4x the file, 64 MiB .. 2 GiB); new room is zeroed when the file grows into it, not before (the heap
+   commits memory when it is touched). The HBLauncher runtime's design (vfs.c), on the SD card. */
+
+#define SHM_MIN_CAP (64ull << 20)
+#define SHM_MAX_CAP (2048ull << 20)
+#define SHM_ROUND (1ull << 20)
+#define MAX_SHM 32
+
+struct shm {
+    char *path; /* host path */
+    uint8_t *data;
+    uint64_t size, cap;
+    int maps, refs;
+};
+
+static struct shm *g_shm[MAX_SHM];
+static Mutex g_shm_lock;
+
+static struct shm *shm_for_path(const char *path) {
+    for (int i = 0; i < MAX_SHM; i++)
+        if (g_shm[i] && !strcmp(g_shm[i]->path, path)) return g_shm[i];
+    return NULL;
+}
+
+static struct shm *shm_for_addr(uintptr_t a) {
+    for (int i = 0; i < MAX_SHM; i++)
+        if (g_shm[i] && a >= (uintptr_t)g_shm[i]->data && a < (uintptr_t)g_shm[i]->data + g_shm[i]->cap) return g_shm[i];
+    return NULL;
+}
+
+/* Lock held. Writes the buffer back to the file. */
+static long shm_flush(struct shm *m) {
+    int h = open(m->path, O_WRONLY | O_CREAT, 0666);
+    if (h < 0) {
+        lx_logf("lx: shm write-back of %s failed: open (%d)", m->path, errno);
+        return lx_errno(errno);
+    }
+    uint64_t done = 0;
+    while (done < m->size) {
+        ssize_t n = write(h, m->data + done, (size_t)(m->size - done < (8u << 20) ? m->size - done : (8u << 20)));
+        if (n <= 0) break;
+        done += (uint64_t)n;
+    }
+    ftruncate(h, (off_t)m->size);
+    fsync(h);
+    close(h);
+    if (done != m->size) {
+        lx_logf("lx: shm write-back of %s failed after %llu of %llu bytes", m->path, (unsigned long long)done,
+                (unsigned long long)m->size);
+        return -LX_EIO;
+    }
+    return 0;
+}
+
+/* Lock held: a buffer nobody maps or has open any more is written back and freed. */
+static void shm_release_if_unused(struct shm *m) {
+    if (m->maps > 0 || m->refs > 0) return;
+    shm_flush(m);
+    for (int i = 0; i < MAX_SHM; i++)
+        if (g_shm[i] == m) g_shm[i] = NULL;
+    lx_logf("lx: shm released %s (%llu KiB)", m->path, (unsigned long long)(m->size >> 10));
+    free(m->data);
+    free(m->path);
+    free(m);
+}
+
+static void shm_detach(struct fd *f) {
+    mutexLock(&g_shm_lock);
+    f->shm->refs--;
+    shm_release_if_unused(f->shm);
+    f->shm = NULL;
+    mutexUnlock(&g_shm_lock);
+}
+
+/* Lock held: makes f read and write through m. */
+static void shm_attach(struct fd *f, struct shm *m) {
+    if (f->shm) return;
+    off_t at = lseek(f->host_fd, 0, SEEK_CUR);
+    f->pos = at > 0 ? (uint64_t)at : 0;
+    f->shm = m;
+    m->refs++;
+}
+
+/* Lock held: room for size bytes (zeroing what the file grows into). */
+static long shm_resize(struct shm *m, uint64_t size) {
+    if (size > m->cap) {
+        lx_logf("lx: shm %s: %llu bytes is beyond its %llu MiB reservation", m->path, (unsigned long long)size,
+                (unsigned long long)(m->cap >> 20));
+        return -28; /* ENOSPC */
+    }
+    if (size > m->size) memset(m->data + m->size, 0, (size_t)(size - m->size));
+    m->size = size;
+    return 0;
+}
+
+void *lx_fd_map_shared(int fd, uint64_t len, uint64_t off, long *err) {
+    struct fd *f = fd_get(fd);
+    if (!f || f->kind != FD_FILE) {
+        *err = -LX_EBADF;
+        return NULL;
+    }
+    mutexLock(&g_shm_lock);
+    struct shm *m = f->shm ? f->shm : shm_for_path(f->path);
+    if (!m) {
+        struct stat st;
+        uint64_t size = fstat(f->host_fd, &st) == 0 ? (uint64_t)st.st_size : 0;
+        uint64_t need = size > off + len ? size : off + len;
+        uint64_t cap = (need * 4 + SHM_ROUND - 1) & ~(SHM_ROUND - 1);
+        if (cap < SHM_MIN_CAP) cap = SHM_MIN_CAP;
+        if (cap > SHM_MAX_CAP) cap = (need + SHM_ROUND - 1) & ~(SHM_ROUND - 1);
+        int slot;
+        for (slot = 0; slot < MAX_SHM && g_shm[slot]; slot++) {
+        }
+        m = calloc(1, sizeof *m);
+        uint8_t *data = slot < MAX_SHM && m ? aligned_alloc(4096, (size_t)cap) : NULL;
+        if (!data) {
+            free(m);
+            mutexUnlock(&g_shm_lock);
+            *err = -LX_ENOMEM;
+            return NULL;
+        }
+        m->path = strdup(f->path);
+        m->data = data;
+        m->cap = cap;
+        /* Read the file in (the fd's position is left alone). */
+        int h = open(f->path, O_RDONLY);
+        uint64_t got = 0;
+        if (h >= 0) {
+            while (got < size) {
+                ssize_t n = read(h, data + got, (size_t)(size - got));
+                if (n <= 0) break;
+                got += (uint64_t)n;
+            }
+            close(h);
+        }
+        m->size = got;
+        g_shm[slot] = m;
+        lx_logf("lx: shm %s: %llu KiB, reserved %llu MiB", m->path, (unsigned long long)(got >> 10),
+                (unsigned long long)(cap >> 20));
+        /* Every open descriptor of the file goes through the buffer from now on. */
+        mutexLock(&g_fd_lock);
+        for (int i = 0; i < MAX_FDS; i++)
+            if (g_fds[i] && g_fds[i]->kind == FD_FILE && !g_fds[i]->shm && !strcmp(g_fds[i]->path, m->path))
+                shm_attach(g_fds[i], m);
+        mutexUnlock(&g_fd_lock);
+    }
+    shm_attach(f, m);
+    if (off + len > m->cap) {
+        lx_logf("lx: shm %s: mapping %llu+%llu is beyond its %llu MiB reservation", m->path, (unsigned long long)off,
+                (unsigned long long)len, (unsigned long long)(m->cap >> 20));
+        mutexUnlock(&g_shm_lock);
+        *err = -LX_ENOMEM;
+        return NULL;
+    }
+    m->maps++;
+    mutexUnlock(&g_shm_lock);
+    return m->data + off;
+}
+
+int lx_fd_unmap_shared(uintptr_t addr) {
+    mutexLock(&g_shm_lock);
+    struct shm *m = shm_for_addr(addr);
+    if (m) {
+        if (m->maps > 0) m->maps--;
+        shm_release_if_unused(m);
+    }
+    mutexUnlock(&g_shm_lock);
+    return m != NULL;
+}
+
+/* mremap of a shared mapping: the same buffer serves any length within its reservation. Returns the address, or 0
+   if addr isn't a shared mapping (-ENOMEM beyond the reservation). */
+long lx_fd_remap_shared(uintptr_t addr, uint64_t new_len) {
+    mutexLock(&g_shm_lock);
+    struct shm *m = shm_for_addr(addr);
+    long r = 0;
+    if (m) r = addr + new_len <= (uintptr_t)m->data + m->cap ? (long)addr : -LX_ENOMEM;
+    mutexUnlock(&g_shm_lock);
+    return r;
+}
+
+long lx_fd_msync(uintptr_t addr) {
+    mutexLock(&g_shm_lock);
+    struct shm *m = shm_for_addr(addr);
+    long r = m ? shm_flush(m) : 0;
+    mutexUnlock(&g_shm_lock);
+    return r;
+}
+
+/* For MAP_PRIVATE file mappings: copies len bytes at off into buf (the shared buffer's view if there is one). */
+long lx_fd_read_at(int fd, void *buf, uint64_t len, uint64_t off) {
+    long total = 0;
+    while ((uint64_t)total < len) {
+        long n = lx_pread(fd, (uint8_t *)buf + total, (size_t)(len - (uint64_t)total), (long)(off + (uint64_t)total), 0);
+        if (n <= 0) return total ? total : n;
+        total += n;
+    }
+    return total;
+}
+
+static long shm_rw(struct fd *f, void *buf, size_t len, uint64_t at, int is_write, int advance) {
+    mutexLock(&g_shm_lock);
+    struct shm *m = f->shm;
+    long r;
+    if (is_write) {
+        if ((f->flags & L_O_APPEND) && advance) at = m->size;
+        r = at + len > m->size ? shm_resize(m, at + len) : 0;
+        if (!r) {
+            memcpy(m->data + at, buf, len);
+            r = (long)len;
+        }
+    } else {
+        r = at < m->size ? (long)(m->size - at < len ? m->size - at : len) : 0;
+        if (r) memcpy(buf, m->data + at, (size_t)r);
+    }
+    if (r > 0 && advance) f->pos = at + (uint64_t)r;
+    mutexUnlock(&g_shm_lock);
+    return r;
 }
 
 /* ---- syscalls ------------------------------------------------------------------------------------------------ */
@@ -323,6 +552,16 @@ long lx_openat(int dirfd, const char *path, int flags, int mode) {
             f->host_fd = hfd;
         }
         f->path = strdup(hp);
+        if (f->kind == FD_FILE) {
+            mutexLock(&g_shm_lock);
+            struct shm *m = shm_for_path(hp);
+            if (m) {
+                shm_attach(f, m);
+                f->pos = 0;
+                if (flags & L_O_TRUNC) shm_resize(m, 0);
+            }
+            mutexUnlock(&g_shm_lock);
+        }
     }
     f->lx_path = strdup(lp);
     f->flags = flags & (L_O_APPEND | L_O_NONBLOCK);
@@ -409,6 +648,7 @@ long lx_read(int fd, void *buf, size_t len) {
     case FD_ZERO: memset(buf, 0, len); return (long)len;
     case FD_RANDOM: randomGet(buf, len); return (long)len;
     case FD_FILE: {
+        if (f->shm) return shm_rw(f, buf, len, f->pos, 0, 1);
         ssize_t n = read(f->host_fd, buf, len);
         return n < 0 ? lx_errno(errno) : n;
     }
@@ -430,6 +670,7 @@ long lx_write(int fd, const void *buf, size_t len) {
     }
     case FD_NULL: case FD_ZERO: case FD_RANDOM: return (long)len;
     case FD_FILE: {
+        if (f->shm) return shm_rw(f, (void *)buf, len, f->pos, 1, 1);
         ssize_t n = write(f->host_fd, buf, len);
         return n < 0 ? lx_errno(errno) : n;
     }
@@ -443,6 +684,7 @@ long lx_pread(int fd, void *buf, size_t len, long off, int is_write) {
     struct fd *f = fd_get(fd);
     if (!f) return -LX_EBADF;
     if (f->kind != FD_FILE) return -LX_ESPIPE;
+    if (f->shm) return shm_rw(f, buf, len, (uint64_t)off, is_write, 0);
     /* newlib has no pread: seek, transfer, seek back (callers that share an fd across threads serialise anyway). */
     off_t was = lseek(f->host_fd, 0, SEEK_CUR);
     if (lseek(f->host_fd, off, SEEK_SET) < 0) return lx_errno(errno);
@@ -464,6 +706,14 @@ long lx_lseek(int fd, long off, int whence) {
         return -LX_EINVAL;
     }
     if (f->kind != FD_FILE) return -LX_ESPIPE;
+    if (f->shm) {
+        mutexLock(&g_shm_lock);
+        int64_t base = whence == 0 ? 0 : whence == 1 ? (int64_t)f->pos : (int64_t)f->shm->size;
+        int64_t to = base + off;
+        if (to >= 0) f->pos = (uint64_t)to;
+        mutexUnlock(&g_shm_lock);
+        return to < 0 ? -LX_EINVAL : (long)to;
+    }
     off_t r = lseek(f->host_fd, off, whence);
     return r < 0 ? lx_errno(errno) : (long)r;
 }
@@ -481,6 +731,7 @@ long lx_fstat(int fd, void *out) {
     case FD_FILE:
         if (fstat(f->host_fd, &st) != 0) return lx_errno(errno);
         to_lx_stat(&st, f->path, out);
+        if (f->shm) ((struct lx_stat *)out)->size = (int64_t)f->shm->size;
         return 0;
     case FD_DIR:
         if (stat(f->path, &st) != 0) return lx_errno(errno);
@@ -590,12 +841,24 @@ long lx_renameat(int olddirfd, const char *oldpath, int newdirfd, const char *ne
 long lx_ftruncate(int fd, long len) {
     struct fd *f = fd_get(fd);
     if (!f || f->kind != FD_FILE) return -LX_EBADF;
+    if (f->shm) {
+        mutexLock(&g_shm_lock);
+        long r = len < 0 ? -LX_EINVAL : shm_resize(f->shm, (uint64_t)len);
+        mutexUnlock(&g_shm_lock);
+        return r;
+    }
     return ftruncate(f->host_fd, len) == 0 ? 0 : lx_errno(errno);
 }
 
 long lx_fsync(int fd) {
     struct fd *f = fd_get(fd);
     if (!f) return -LX_EBADF;
+    if (f->kind == FD_FILE && f->shm) {
+        mutexLock(&g_shm_lock);
+        long r = shm_flush(f->shm);
+        mutexUnlock(&g_shm_lock);
+        return r;
+    }
     if (f->kind == FD_FILE) fsync(f->host_fd);
     return 0;
 }

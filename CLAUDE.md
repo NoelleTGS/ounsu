@@ -144,7 +144,7 @@ are tracked.
 | `src/osu-framework`, `src/osu`, `src/mysoundlib` | Patched checkouts, copied **with their uncommitted changes** (git working trees; `patches/*.diff` snapshot them via `tools/export-patches.sh`). Build outputs (bin/obj) weren't copied. |
 | `src/native/{SDL,ffmpeg,veldrid-spirv,realm-dotnet,openssl,sqlite-dl}`, `src/veldrid-src` | Native sources with the hbxl patches; the `build-hbx/` and `build-desktop/` outputs weren't copied (they still exist in `~/osu-HBLauncher/src/native/*`). Under the musl-island plan they stay **musl builds** (not devkitA64): reuse or rebuild them with the musl toolchain. |
 | `patches/` | Diff + base commit + notes per external checkout (SDL, osu, osu-framework, ffmpeg, openssl, realm-dotnet, mysoundlib, veldrid-spirv). The hbxl runtime diff is `~/osu-HBLauncher/patches/HBLauncher.diff` (applied in `~/HBLauncher`). |
-| `tools/` | resource-extract (osu-resources → loose files), gen-rdxml, build-ffmpeg-hbx.sh, export-patches.sh, net-probe-server.py. |
+| `tools/` | resource-extract (osu-resources → loose files), gen-rdxml, build-ffmpeg.sh, export-patches.sh, net-probe-server.py. |
 | `fsroot/` | Copied game data, a starting point for the SD card layout: `osu-resources/` (extracted resources), `usr/local/ssl/cert.pem` (CA bundle), `home/.local/share/osu` (the console's osu! data folder: realm, beatmaps, settings, **a logged-in session**; treat it as the user's private data). Nothing in it is tracked. |
 | `vk-include/` | Vulkan headers used with Arch's cross gcc (OunceVK installs its own). |
 

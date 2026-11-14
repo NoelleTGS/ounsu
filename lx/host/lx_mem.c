@@ -18,6 +18,8 @@
 #include "lx_host.h"
 
 #define PAGE 4096u
+#define MAP_SHARED 0x01
+#define MAP_PRIVATE 0x02
 #define MAP_FIXED 0x10
 #define MAP_ANONYMOUS 0x20
 #define MAX_BLOCKS 8192
@@ -54,7 +56,22 @@ long lx_mmap(uintptr_t addr, size_t len, int prot, int flags, int fd, long off) 
     (void)off;
     if (!len) return -LX_EINVAL;
     len = (len + PAGE - 1) & ~(size_t)(PAGE - 1);
-    if (!(flags & MAP_ANONYMOUS) || fd != -1) return -LX_ENOSYS; /* file mappings: later */
+    if (!(flags & MAP_ANONYMOUS)) {
+        if (flags & MAP_SHARED) { /* the file's shared buffer (lx_fd.c) */
+            long err = 0;
+            void *p = lx_fd_map_shared(fd, len, (uint64_t)off, &err);
+            return p ? (long)(uintptr_t)p : err;
+        }
+        /* MAP_PRIVATE: a private copy */
+        long r = lx_mmap(0, len, prot, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (r < 0) return r;
+        long got = lx_fd_read_at(fd, (void *)r, len, (uint64_t)off);
+        if (got < 0) {
+            lx_munmap((uintptr_t)r, len);
+            return got;
+        }
+        return r;
+    }
 
     mutexLock(&g_lock);
     if (flags & MAP_FIXED) {
@@ -85,6 +102,7 @@ long lx_mmap(uintptr_t addr, size_t len, int prot, int flags, int fd, long off) 
 }
 
 long lx_munmap(uintptr_t addr, size_t len) {
+    if (lx_fd_unmap_shared(addr)) return 0;
     len = (len + PAGE - 1) & ~(size_t)(PAGE - 1);
     mutexLock(&g_lock);
     struct block *b = find(addr);
@@ -114,6 +132,8 @@ long lx_mremap(uintptr_t addr, size_t old_len, size_t new_len, int flags) {
     (void)flags;
     /* musl's pthread_getattr_np finds the main stack's bottom by mremap probes going down until one fails with
        something other than ENOMEM: say "mapped" (ENOMEM) inside the main stack, "unmapped" (EFAULT) elsewhere. */
+    long shared = lx_fd_remap_shared(addr, new_len);
+    if (shared) return shared;
     if (addr >= g_main_stack_lo && addr < g_main_stack_hi) return -LX_ENOMEM;
     if (find(addr)) return -LX_ENOMEM; /* can't grow a heap block in place */
     return -LX_EFAULT;

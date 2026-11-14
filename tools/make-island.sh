@@ -23,7 +23,7 @@ NM="$TC/bin/aarch64-linux-musl-nm"
 OUT=$1
 shift
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
+[ -n "${LX_KEEP_WORK:-}" ] && echo "make-island: work directory $WORK" || trap 'rm -rf "$WORK"' EXIT
 
 CFLAGS="-O2 -g -Wall -Wextra -Werror -fPIE -ffunction-sections -fdata-sections -I$ROOT/lx/include"
 "$CC" $CFLAGS -c "$ROOT/lx/island/lx_island.c" -o "$WORK/lx_island.o"
@@ -34,9 +34,12 @@ LIBC=$("$CC" -print-file-name=libc.a)
 LIBGCC=$("$CC" -print-libgcc-file-name)
 LIBGCC_EH=$("$CC" -print-file-name=libgcc_eh.a)
 
+# --force-group-allocation dissolves COMDAT groups (C++ templates, typeinfo, inline functions): the final link
+# deduplicates groups by name, and with C++ on the host side too (OunceVK) it kept the host's copy of a group and
+# dropped the island's, leaving the island's references dangling (typeinfo for __cxxabiv1::__forced_unwind).
 island_link() { # extra linker flags...
     "$CC" -nostdlib -nostartfiles -r -Wl,-T,"$ROOT/lx/island/island-r.ld" -o "$WORK/full.o" \
-        -Wl,--wrap=getaddrinfo -Wl,--wrap=freeaddrinfo "$@" \
+        -Wl,--force-group-allocation -Wl,--wrap=getaddrinfo -Wl,--wrap=freeaddrinfo "$@" \
         "$WORK/lx_island.o" "$WORK/lx_island_asm.o" "$WORK/lx_net.o" $INPUTS \
         -Wl,--start-group "$LIBC" "$LIBGCC" "$LIBGCC_EH" -Wl,--end-group
 }
@@ -53,24 +56,22 @@ for a in "$@"; do INPUTS="$INPUTS $(printf '%s' "$a" | sed 's/ /\\ /g')"; done
 island_link
 WEAK=$(weak_undefined)
 if [ -n "$WEAK" ]; then
-    island_link $(for w in $WEAK; do printf ' -Wl,-u,%s' "$w"; done)
+    PULL=$(for w in $WEAK; do printf ' -Wl,-u,%s' "$w"; done)
+    island_link $PULL
     WEAK=$(weak_undefined)
     if [ -n "$WEAK" ]; then
         echo "make-island: weak references left at 0: $(echo $WEAK)"
-        island_link $(for w in $WEAK; do printf ' -Wl,--defsym,%s=0' "$w"; done)
+        island_link $PULL $(for w in $WEAK; do printf ' -Wl,--defsym,%s=0' "$w"; done)
     fi
 fi
 
 # Undefined symbols that no relocation uses are debris (the .NET runtime's WriteBarriers.S.o lists its macro
 # parameters "dst" and "val" that way); drop them so they can't meet anything in the final link.
-READELF="$TC/bin/aarch64-linux-musl-readelf"
-RELOC_SYMS=$("$READELF" -rW "$WORK/full.o" | awk 'NF >= 5 && $1 ~ /^[0-9a-f]+$/ {print $5}' | sort -u)
 STRIP=""
-for sym in $("$NM" -u "$WORK/full.o" | awk '$1 == "U" {print $2}'); do
-    if ! printf '%s\n' "$RELOC_SYMS" | grep -qx "$sym"; then
-        STRIP="$STRIP --strip-symbol=$sym"
-        echo "make-island: dropping unused undefined symbol $sym"
-    fi
+UNUSED=$(python3 "$ROOT/tools/unused-undef.py" "$WORK/full.o")
+for sym in $UNUSED; do
+    STRIP="$STRIP --strip-symbol=$sym"
+    echo "make-island: dropping unused undefined symbol $sym"
 done
 "$OBJCOPY" $STRIP --keep-global-symbol=lx_island_main "$WORK/full.o" "$OUT"
 

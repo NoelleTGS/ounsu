@@ -3,7 +3,7 @@
 Upstream: [FFmpeg](https://ffmpeg.org/) tag `n7.1.1` (`ffmpeg.base`). Patch: `ffmpeg.diff` (empty: no source changes).
 
 FFmpeg decodes the music and hitsounds for mysoundlib (osu-framework PR #6002). The version matches FFmpeg.AutoGen 7.1.1.
-`tools/build-ffmpeg-hbx.sh` configures a static, **audio-only** build (decoders, demuxers and swresample osu! needs, no
+`tools/build-ffmpeg.sh` configures a static, position-independent, **audio-only** build (decoders, demuxers and swresample osu! needs, no
 video, no programs) for the console into `build-hbx/`, and with the `desktop` argument an x86_64 shared build into
 `build-desktop/` for desktop comparison runs.
 
@@ -16,5 +16,5 @@ Video backgrounds would need the video decoders and swscale added to the build s
 
 ```sh
 git -C src/native/ffmpeg checkout -f db69d06eeeab4f46da15030a80d539efb4503ca8
-sh ~/osu-HBLauncher/tools/build-ffmpeg-hbx.sh
+sh tools/build-ffmpeg.sh   (output: src/native/ffmpeg/build-lx)
 ```

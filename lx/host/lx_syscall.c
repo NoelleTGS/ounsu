@@ -241,6 +241,7 @@ long lx_syscall(long n, long a, long b, long c, long d, long e, long f) {
     case 216: return lx_mremap((uintptr_t)a, (size_t)b, (size_t)c, (int)d);              /* mremap */
     case 233: return lx_madvise((uintptr_t)a, (size_t)b, (int)c);                        /* madvise */
     case 226: return 0;                                                                   /* mprotect */
+    case 227: return lx_fd_msync((uintptr_t)a);                                           /* msync */
     case 214: return 0;                                                                   /* brk: none */
 
     /* threads */

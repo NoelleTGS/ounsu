@@ -77,8 +77,48 @@ static void report_memory(void) {
     lx_logf("lx: largest malloc: %zu MiB", lo);
 }
 
+/* The island's environment: lines of /lx-env (KEY=VALUE, # comments) from the island root on the SD card, then from
+   the .nro's romfs (a build's defaults), then the host's defaults. getenv returns the first match, so the SD card
+   overrides the build, which overrides the defaults. */
+#define MAX_ENV 96
+static char *g_env[MAX_ENV + 1];
+static int g_nenv;
+
+static void env_add(char *line) {
+    if (g_nenv < MAX_ENV && line && *line && *line != '#' && strchr(line, '=')) g_env[g_nenv++] = line;
+}
+
+static void env_load(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char buf[512];
+    int n = 0;
+    while (fgets(buf, sizeof buf, f)) {
+        size_t len = strcspn(buf, "\r\n");
+        buf[len] = 0;
+        char *p = buf;
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p || *p == '#') continue;
+        env_add(strdup(p));
+        n++;
+    }
+    fclose(f);
+    lx_logf("lx: %d environment line(s) from %s", n, path);
+}
+
+static char **build_env(int romfs) {
+    char path[512];
+    snprintf(path, sizeof path, "%s/lx-env", lx_fd_root());
+    env_load(path);
+    if (romfs) env_load("romfs:/lx-env");
+    env_add("HOME=/home");
+    env_add("PWD=/");
+    env_add("LANG=C.UTF-8");
+    g_env[g_nenv] = NULL;
+    return g_env;
+}
+
 int main(int argc, char **argv) {
-    static char *const default_env[] = { "HOME=/", "PWD=/", "LANG=C.UTF-8", NULL };
     static uint8_t random16[16];
     struct lx_host host;
     int code;
@@ -117,7 +157,6 @@ int main(int argc, char **argv) {
     host.eh_frame_hdr_size = (uintptr_t)(__eh_frame_hdr_end - __eh_frame_hdr_start);
     host.argc = argc > 0 ? argc : 1;
     host.argv = argc > 0 ? argv : (char *const[]){ "lx-app", NULL };
-    host.envp = default_env;
     randomGet(random16, sizeof random16);
     host.random16 = random16;
 
@@ -132,6 +171,7 @@ int main(int argc, char **argv) {
     int romfs = R_SUCCEEDED(romfsInit());
     lx_fd_use_romfs(romfs);
     lx_logf("lx: island root is %s%s", lx_fd_root(), romfs ? " (+ the .nro's romfs)" : "");
+    host.envp = build_env(romfs);
 
     void *stack = aligned_alloc(4096, LX_MAIN_STACK);
     if (!stack) {

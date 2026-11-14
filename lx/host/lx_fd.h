@@ -55,6 +55,10 @@ struct fd {
 
     /* FD_EPOLL */
     struct epoll_set *epoll;
+
+    /* FD_FILE with a shared mapping (MAP_SHARED): the file's contents live in shm, and this fd reads/writes there */
+    struct shm *shm;
+    uint64_t pos;
 };
 
 struct fd *fd_get(int fd);

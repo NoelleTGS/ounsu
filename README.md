@@ -61,7 +61,7 @@ will be documented once the host program exists.
 | `console/osu-game/` | The osu! app: `Program.cs` (entry point, diagnostics), `Switch2Settings.cs`, `HubSelfTest.cs`, `osu-game.csproj`, `build.sh`, `rd.xml`, `shim/` (C shims: input, audio output, Vulkan, networking, BASS stubs) |
 | `probes/` | Bring-up probes: `aot-hello` (NativeAOT), `gfx-probe` (Veldrid/Vulkan), `net-probe` (sockets, DNS, TLS, HTTP, WebSocket), `hub-probe` (osu!'s metadata hub against a local server) |
 | `patches/` | Snapshots of the local changes in the external checkouts (see below) |
-| `tools/` | `resource-extract` (osu-resources → loose files), `gen-rdxml` (rd.xml generator), `build-ffmpeg-hbx.sh`, `export-patches.sh`, `net-probe-server.py` |
+| `tools/` | `resource-extract` (osu-resources → loose files), `gen-rdxml` (rd.xml generator), `build-ffmpeg.sh`, `export-patches.sh`, `net-probe-server.py` |
 
 Not tracked (large, external or private): `src/` (the osu!, osu-framework, mysoundlib and native library checkouts),
 `fsroot/` (game resources and osu! data), build outputs.
