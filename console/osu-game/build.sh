@@ -56,6 +56,10 @@ python3 "$ROOT/tools/aot-island.py" "$LX_CAPTURE" "$HERE" "$HERE/build/island.o"
     -Wl,--start-group $SPIRV_LIBS "$SSL/libssl.a" "$SSL/libcrypto.a" "$SQLITE" $REALM_LIBS \
     "$FF/libavformat.a" "$FF/libavcodec.a" "$FF/libswresample.a" "$FF/libavutil.a" -Wl,--end-group -lstdc++ -lm
 
+# Absolute build paths (realm-core's assert strings, FFmpeg's and OpenSSL's configure lines, .NET attributes) would
+# name the builder's home folder: overwrite them in place with a neutral path of the same length.
+python3 "$ROOT/tools/scrub-paths.py" "$HERE/build/island.o" "$HOME"
+
 install -m 644 "$ROOT/fsroot/usr/local/ssl/cert.pem" obj/romfs/usr/local/ssl/cert.pem
 cat > obj/romfs/lx-env <<'EOF'
 # osu-game's default environment (build.sh). Lines in /switch/ounsu/lx-env on the SD card come first and win.
@@ -65,11 +69,25 @@ OSU_RESOURCES_DIR=/osu-resources
 EOF
 # LX_ENV_EXTRA: extra lines for a test build (e.g. LX_ENV_EXTRA="LX_TRACE=1").
 if [ -n "${LX_ENV_EXTRA:-}" ]; then printf '%s\n' $LX_ENV_EXTRA >> obj/romfs/lx-env; fi
-# The .nro's hbmenu entry. The version is the port's own (osu-game's assembly version stays 0.0.0, see CLAUDE.md).
+# The .nro's hbmenu entry (osu-game's assembly version stays 0.0.0, see CLAUDE.md). The version uses osu!'s scheme,
+# yyyy.Mdd.N from the build date, N being the first number not yet tagged in git. OUNSU_VERSION overrides it (e.g.
+# OUNSU_VERSION=2026.1114.0 to finish a release after midnight). tools/release.sh reads build/ounsu.release.
 NRO_AUTHOR="NoelleTGS"
-NRO_VERSION="0.1.0"
+if [ -n "${OUNSU_VERSION:-}" ]; then
+    NRO_VERSION=$OUNSU_VERSION
+else
+    set -- $(date '+%Y %m %d')
+    DAY="$1.$(echo "$2" | sed 's/^0//')$3"
+    N=0
+    while git -C "$ROOT" rev-parse -q --verify "refs/tags/$DAY.$N" >/dev/null; do N=$((N + 1)); done
+    NRO_VERSION="$DAY.$N"
+fi
+DIRTY=0
+if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]; then DIRTY=1; fi
+printf 'version=%s\ncommit=%s\ndirty=%s\n' "$NRO_VERSION" "$(git -C "$ROOT" rev-parse HEAD)" "$DIRTY" > "$HERE/build/ounsu.release"
 ICON_ARGS=""
 if [ -f "$HERE/icon.jpg" ]; then ICON_ARGS="ICON=$HERE/icon.jpg"; fi
 make -s -C "$ROOT/lx/host" ISLAND="$HERE/build/island.o" APP=ounsu APP_TITLE="ounsu!" APP_AUTHOR="$NRO_AUTHOR" \
     APP_VERSION="$NRO_VERSION" $ICON_ARGS OUT="$HERE/build" VULKAN=1 ROMFS="$HERE/obj/romfs"
 ls -la "$HERE/build/ounsu.nro"
+echo "build.sh: ounsu! $NRO_VERSION"

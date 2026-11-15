@@ -64,7 +64,7 @@ To update, delete `/switch/ounsu/osu-resources/`, then extract the new zip the s
 
    ```sh
    R=$(sed -n 's/.*"ppy\.osu\.Game\.Resources" Version="\([^"]*\)".*/\1/p' src/osu/osu.Game/osu.Game.csproj)
-   DLL=$(ls ~/.nuget/packages/ppy.osu.game.resources/$R/lib/*/osu.Game.Resources.dll)
+   DLL=$(ls "${NUGET_PACKAGES:-$HOME/.nuget/packages}"/ppy.osu.game.resources/$R/lib/*/osu.Game.Resources.dll)
    dotnet run --project tools/resource-extract -c Release -- extract \
        fsroot/osu-resources console/osu-game/osu-resources.substitutions.xml "$DLL"
    ```
@@ -159,6 +159,10 @@ Not tracked (large, external or private): `src/` (the osu!, osu-framework, mysou
 | `patches/ffmpeg.diff`, `patches/veldrid-spirv.diff`, `patches/openssl.diff` | `src/native/...` | static builds |
 
 Each `patches/<name>.md` describes the changes; each `*.base` names the commit the patch applies to. Refresh the snapshots with `sh tools/export-patches.sh` before committing.
+
+## Licence
+
+ounsu!'s own code is under the [MIT licence](LICENSE). Parts of `lx/host` are ported from HBLauncher's Linux runtime (MIT, RavensClawX and contributors; its notice is in `LICENSE` too). The files in `patches/` change other projects and are under those projects' licences. Release zips also contain osu!'s resources (CC BY-NC 4.0, non-commercial use only) and libraries under their own licences, all listed in `THIRD_PARTY_NOTICES.txt` inside the zip.
 
 ## Credits
 

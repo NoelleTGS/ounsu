@@ -6,6 +6,15 @@ the user; libounce's default until then); SD root `/switch/ounsu`. Never put osu
 affiliated with ppy" note in the README. Use "osu!" only to say what this is a port of. Internal names
 (`console/osu-game`, `HBXL_*`, osu-game.csproj) stay.
 
+**Releases (2026-11-15):** licence MIT (`LICENSE`, copyright NoelleTGS, plus HBLauncher's MIT notice for `lx/host`).
+Versions use osu!'s scheme: build.sh stamps `yyyy.Mdd.N` from the build date (`OUNSU_VERSION` overrides; N counts
+existing git tags) and writes `build/ounsu.release` (version, commit, dirty). `tools/release.sh` checks that record
+against HEAD, extracts the resources fresh, runs `tools/gen-notices.py` (THIRD_PARTY_NOTICES.txt from src/ licence
+files, the devkit, musl and every NuGet package in project.assets.json; unknown licences stop it: add them to KNOWN),
+zips `dist/ounsu-<version>.zip`, then tags, pushes the tag and creates a **draft** GitHub release. build.sh runs
+`tools/scrub-paths.py` on island.o: `$HOME` in strings becomes `/build//...` (same length), so no home paths ship.
+WiiCompiled-Switch2 is GPLv3: never copy code from it (none is in this repo; checked 2026-11-15).
+
 Goal: run osu! lazer (C#/.NET, ~/osu) as **homebrew (.nro) under kaiHEN改変** on a jailbroken Switch 2: launched
 from hbmenu, running entirely off the console and its SD card once started (no PC tether, no file server).
 Releases (user's decision, 2026-11-14): a zip of the SD layout, `switch/ounsu.nro` + `switch/ounsu/osu-resources/`
@@ -144,7 +153,7 @@ NativeAOT). The nn::hid / six-axis / keyboard **SDK offsets** were for SmileBASI
   order, PR #6002 audio via SDL3 + mysoundlib + FFmpeg), osu `HBXL_*` defines (settings section, hubs, notification
   connector null fix, build-date assembly versions).
 - **Build gotchas:** `-p:HbxlBuild=true` must be on the dotnet command line (a global property), otherwise the framework
-  patches silently vanish. osu-game's assembly version must stay **0.0.0** (the .nro's own version, author and icon are set in `console/osu-game/build.sh`: NRO_VERSION) (1.0.0 = "deployed" build: legacy score
+  patches silently vanish. osu-game's assembly version must stay **0.0.0** (the .nro's own version, author and icon are set in `console/osu-game/build.sh`; the version is stamped from the build date) (1.0.0 = "deployed" build: legacy score
   JSON, Sentry reports to ppy). Linking real `-lstdc++` needs NativeAOT's `libstdc++compat.a` dropped.
 - **NativeAOT + JSON:** `rd.xml` from `tools/gen-rdxml` (build.sh regenerates it); `OSU_HBXL_JSON_SELFTEST=1`.
 - **Metadata hub:** `HbxlMessagePackHubProtocol` + `HbxlHubTypes` (stock SignalR protocol needs expression trees);

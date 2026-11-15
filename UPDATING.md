@@ -13,8 +13,8 @@ Things you **don't** update by hand:
 
 - **osu.Game's assembly version.** `src/osu/Directory.Build.targets` stamps the build date (`yyyy.Mdd.0`) on every build.
 - **The console app's version.** It stays `0.0.0` (`console/osu-game/osu-game.csproj`) so osu! treats it as a
-  self-built client. The `.nro`'s own version shown in hbmenu is `NRO_VERSION` in `console/osu-game/build.sh`: bump that
-  if you want hbmenu to show the change.
+  self-built client. The `.nro`'s own version shown in hbmenu is stamped by `console/osu-game/build.sh`
+  from the build date (osu!'s `yyyy.Mdd.N` scheme), so there's nothing to bump.
 - **`~/osu`**, the untouched reference checkout. `src/osu`'s `origin` points at it, so fetch from GitHub instead (below).
 - The native libraries (SDL3, Realm, FFmpeg, OpenSSL, veldrid-spirv). They only need attention if the new version raises a
   package that wraps them (see step 2).
@@ -272,9 +272,16 @@ Then update the text:
 - `CLAUDE.md`: `~/osu`'s commit is only the reference checkout. Mention the new `src/osu` base where the status says
   which osu! version the port runs.
 - `FEASIBILITY.md`: append a dated entry (old → new tags, conflicts, anything that broke). Append, don't rewrite.
-- `NRO_VERSION` in `console/osu-game/build.sh` if you want hbmenu to show it.
 
 Commit: `git add patches console/osu-game/rd.xml console/osu-game/osu-resources.substitutions.xml *.md && git commit`.
+
+## 8. Make a release
+
+The same steps release any build, after an update or not.
+
+1. Commit everything, then run a full build: `sh console/osu-game/build.sh`. The `.nro` gets a version in osu!'s scheme from the build date (`yyyy.Mdd.N`, e.g. `2026.1114.0`; `N` counts up when a release with that date is already tagged). `OUNSU_VERSION=2026.1114.0 sh console/osu-game/build.sh` sets it by hand, e.g. to finish a release after midnight.
+2. Test the build on the console.
+3. Run `sh tools/release.sh`. It checks that the build matches the committed code and that the version isn't released yet, extracts osu!'s resources fresh from the package osu! uses, generates `THIRD_PARTY_NOTICES.txt` (`tools/gen-notices.py`), and packs `dist/ounsu-<version>.zip`. After you confirm, it tags the commit, pushes the tag and creates a **draft** GitHub release with the zip and notes generated from the commits (needs the [GitHub CLI](https://cli.github.com/), logged in). Review the draft on GitHub and publish it there. `sh tools/release.sh --zip-only` stops after the zip.
 
 ## Rolling back
 
