@@ -17,7 +17,7 @@ endif
 
 APP        ?= lx-app
 APP_TITLE  ?= $(APP)
-APP_AUTHOR ?= osu-kaihen
+APP_AUTHOR ?= ounsu
 APP_VERSION ?= 0.0.0
 OUT        ?= $(CURDIR)/build
 ICON       ?= $(DEVKITPRO)/libounce/default_icon.jpg

@@ -90,9 +90,9 @@ Stages: 0 CSPRNG + clock, 1 blocking TCP, 2 DNS (console resolver), 3 async sock
 
 ## Test 6: osu! on kaiHEN (Phase 4, first run: no input, no audio)
 
-Needs `osu-resources` on the SD card at `/switch/osu/osu-resources` (once: `python3 tools/ftp-upload.py
-fsroot/osu-resources sdmc:/switch/osu/osu-resources` with ounceshell's FTP server running; done 2026-11-14).
+Needs `osu-resources` on the SD card at `/switch/ounsu/osu-resources` (once: `python3 tools/ftp-upload.py
+fsroot/osu-resources sdmc:/switch/ounsu/osu-resources` with ounceshell's FTP server running; done 2026-11-14).
 Build: `sh console/osu-game/build.sh` (`LX_SKIP_PUBLISH=1` relinks without recompiling osu!). Send
-`console/osu-game/build/osu.nro` (168 MB) with nxlink. Fresh osu! data (first-run setup), silent audio, input not wired
+`console/osu-game/build/ounsu.nro` (168 MB) with nxlink. Fresh osu! data (first-run setup), silent audio, input not wired
 yet. The goal of the first runs: get to osu!'s intro and main menu, collect the syscalls/paths that fail.
 Runs 1-4 (2026-11-14): osu! starts and renders at 60 fps (empty screen); Realm fixes in progress (FEASIBILITY.md).

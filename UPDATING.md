@@ -26,7 +26,7 @@ Never work around the server's refusal of self-built clients (version hash, clie
 ## 0. Before you start
 
 ```sh
-cd ~/switch2hax/osu-kaihen
+cd ~/switch2hax/ounsu
 git status                       # the port repo should be clean
 sh tools/export-patches.sh       # snapshot the current patched state
 git diff --stat patches/         # should be empty; if not, commit it first: that is your rollback point
@@ -214,14 +214,12 @@ Swap the folders once it worked (`mv fsroot/osu-resources fsroot/osu-resources.o
 fsroot/osu-resources`), then upload them to the card. With ounceshell's FTP server running on the console:
 
 ```sh
-python3 tools/ftp-upload.py fsroot/osu-resources /switch/osu/osu-resources --host <console-ip>
+python3 tools/ftp-upload.py fsroot/osu-resources /switch/ounsu/osu-resources --host <console-ip>
 ```
 
 The upload skips files whose size didn't change. A file that changed but kept its exact size would be skipped too, so
-after a resources update, delete `/switch/osu/osu-resources` on the card first (ounceshell) and upload it fresh. Files
+after a resources update, delete `/switch/ounsu/osu-resources` on the card first (ounceshell) and upload it fresh. Files
 that upstream removed stay behind otherwise as well.
-
-The `.nro` icon (`console/osu-game/tools/make-icon.py`) is made from these resources at build time. Nothing to do.
 
 ## 5. Build
 
@@ -252,13 +250,13 @@ Send the build with nxlink and keep the log (see TESTING.md and CLAUDE.md, "Work
 
 - [ ] Starts, main menu at full frame rate, no new errors in the log (`grep -iE 'exception|error|fail'`).
 - [ ] **Realm migration:** a new version may bump the schema. Start with the existing data folder on the card (back up
-      `/switch/osu/home/.local/share/osu` first) and check that beatmaps, scores and skins are still there.
+      `/switch/ounsu/home/.local/share/osu` first) and check that beatmaps, scores and skins are still there.
 - [ ] Song select, a full map in each ruleset, results screen, replay.
 - [ ] Audio: music, hitsounds, no crackles; seeking in song select.
 - [ ] Skins: default skins load, and a saved skin layout still applies (that depends on the version stamp).
 - [ ] Settings, including the **Switch 2** section; mod select (enum dropdowns).
 - [ ] Online: log in, beatmap listing/download, metadata hub connects (and gets refused quietly), news/changelog.
-- [ ] Import from `/switch/osu/import`.
+- [ ] Import from `/switch/ounsu/import`.
 - [ ] Dock/undock, Joy-Con mouse, touch, exit back to hbmenu.
 
 ## 7. Record it

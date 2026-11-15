@@ -7,7 +7,7 @@
 Files that already exist remotely with the same size are skipped, so an interrupted upload can simply be run again.
 Directories are created as needed. Standard library only (ftplib), one connection.
 
-Example: python3 tools/ftp-upload.py fsroot/osu-resources /switch/osu/osu-resources
+Example: python3 tools/ftp-upload.py fsroot/osu-resources /switch/ounsu/osu-resources
 (ounceshell may show the SD card under a device prefix such as "sdmc:"; check with --list / first.)
 Only CWD, plain LIST, MKD and STOR with bare names are used: the server crashed on a LIST with a path argument.
 """

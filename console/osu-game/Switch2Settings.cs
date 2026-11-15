@@ -5,7 +5,7 @@
 // value can break things before the settings can be reached: the lx-env value is the default of the setting, and a
 // value changed in the game is saved and wins from then on (the revert button goes back to the lx-env value).
 // Everything is stored in switch2.ini next to osu!'s own config, changed values only. Startup-only options stay in
-// lx-env (/switch/osu/lx-env on the SD card, then the .nro's built-in defaults).
+// lx-env (/switch/ounsu/lx-env on the SD card, then the .nro's built-in defaults).
 //
 // The values reach the C shims through small setters (shim/lx_input.c, lx_audio_out.c, lx_gc.c, lx_osu.c). On the
 // desktop comparison build the setters do nothing, so the section can be looked at there.

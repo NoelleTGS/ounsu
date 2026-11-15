@@ -1,8 +1,15 @@
-# osu! (lazer) → Switch 2 via kaiHEN
+# ounsu!: osu! (lazer) → Switch 2 via kaiHEN
+
+**Branding (2026-11-14):** the port is called **ounsu!** (osu! + Ounce) for trademark reasons: "osu!" and its logo are
+ppy's. The .nro is `ounsu.nro`, titled "ounsu!", with the user's own icon (`console/osu-game/icon.jpg`, made by
+the user; libounce's default until then); SD root `/switch/ounsu`. Never put osu! artwork in the .nro, and keep the "unofficial, not
+affiliated with ppy" note in the README. Use "osu!" only to say what this is a port of. Internal names
+(`console/osu-game`, `HBXL_*`, osu-game.csproj) stay.
 
 Goal: run osu! lazer (C#/.NET, ~/osu) as **homebrew (.nro) under kaiHEN改変** on a jailbroken Switch 2: launched
 from hbmenu, running entirely off the console and its SD card once started (no PC tether, no file server).
-No game data is shipped; the user builds everything from source.
+Releases (user's decision, 2026-11-14): a zip of the SD layout, `switch/ounsu.nro` + `switch/ounsu/osu-resources/`
+(osu-resources unmodified, CC BY-NC 4.0, credited in the README). The repo itself never tracks game data.
 
 This project is a **port of the working HBLauncher version** (`~/osu-HBLauncher`, still intact, at `c11053a`). There,
 osu! was playable with audio, online features, unplugged play and an in-game "Switch 2" settings section. Its
@@ -43,7 +50,7 @@ default**; nxlink is only a development log channel. Never design features aroun
   - **Phase 4 in progress (2026-11-14): osu! renders and takes input** (runs 5-10, FEASIBILITY.md 2026-11-14): Realm
     opens, first-run setup and main menu on screen at 60 fps, and every input works (pad, touch, gyro, USB keyboard/
     mouse, **Joy-Con 2 mouse** via libounce PadPointer; `lx/host/lx_input.c` + `console/osu-game/shim/lx_input.c`,
-    ABI 4). hbmenu's netloader saves each sent .nro as `sdmc:/switch/osu.nro`; launching that from hbmenu runs the
+    ABI 4). hbmenu's netloader saves each sent .nro as `sdmc:/switch/ounsu.nro`; launching that from hbmenu runs the
     PREVIOUS build. **Next, in order:**
     Also done 2026-11-14: **audio** (ABI 5, `lx/host/lx_audio.c` + `shim/lx_audio_out.c`: no crackles, almost no
     latency), the pressure-GC downgrade (`shim/lx_gc.c`), and a **clean exit back to hbmenu** (run 14).
@@ -68,11 +75,11 @@ default**; nxlink is only a development log channel. Never design features aroun
     port ("bind listen socket: Address already in use": the game runs without a log): kill it before sending. nxlink
     prints "exiting ..." whenever the connection drops (crash, exit, or the user undocking, which cuts the ethernet);
     a crash shows no `lx: program exited` line. `LX_LOG_FILE=/lx-last.log` in lx-env copies the log to the card
-    (for undocked runs). The ShadowCast shows black at 1440p/120 Hz: set the docked resolution to 1080p and 60 fps to capture. `LX_TRACE=1` in `sdmc:/switch/osu/lx-env` (or the romfs lx-env, via
+    (for undocked runs). The ShadowCast shows black at 1440p/120 Hz: set the docked resolution to 1080p and 60 fps to capture. `LX_TRACE=1` in `sdmc:/switch/ounsu/lx-env` (or the romfs lx-env, via
     `LX_ENV_EXTRA="LX_TRACE=1"` on build.sh) logs every syscall. Files onto the card:
     `tools/ftp-upload.py` with ounceshell's FTP server. The native libraries come from `~/osu-HBLauncher/src/native`
     (musl builds, `LX_NATIVE_BUILDS`), except OpenSSL and FFmpeg (this repo's src/native). On the card:
-    `/switch/osu/osu-resources` (uploaded 2026-11-14), osu! data in `/switch/osu/home/.local/share/osu` (fresh).
+    `/switch/ounsu/osu-resources` (uploaded 2026-11-14), osu! data in `/switch/ounsu/home/.local/share/osu` (fresh).
     Phase 4: osu-game nro + SD layout + clean exit. Phase 5 (faults →
     managed exceptions) is parked: the loader never gets the exceptions.
 - HBLauncher-only material was left out of this repo on 2026-11-13: bti-probe, vfs-hosttest, the net host tests, the
@@ -166,7 +173,7 @@ NativeAOT). The nn::hid / six-axis / keyboard **SDK offsets** were for SmileBASI
 
 ## Directory map
 
-This repo (`~/switch2hax/osu-kaihen`) is a **fresh git repository** (started 2026-11-13, meant for a new public GitHub
+This repo (`~/switch2hax/ounsu`) is a **fresh git repository** (started 2026-11-13, meant for a new public GitHub
 repo). It shares no history with `~/osu-HBLauncher`, which stays separate; files were copied from there at `c11053a`.
 Everything tracked here is public: no personal data or absolute home paths. `.gitignore` is a whitelist: only the port's own sources, docs, tools and patch snapshots
 are tracked.

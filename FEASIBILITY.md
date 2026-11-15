@@ -371,3 +371,11 @@ Tablet: Wacom CTL-671 (056a:0301) with a custom high-polling-rate firmware. Open
   cause. **Never scan usb:hs blindly again**: every crash costs a console reboot and ns2jb (~20 % per try).
 - **Status: parked.** The way forward is the real Switch 2 `usb:hs` interface: from the usb sysmodule's code
   (firmware RE) or from whoever maps Switch 2 services for libounce, not more probing on the console.
+
+## 2026-11-14: renamed to ounsu!
+
+- For a public release the port no longer presents itself as osu!: "osu!" and the logo are ppy's trademarks, which
+  the MIT licence doesn't cover. The app is now **ounsu!** (osu! + Ounce): `build/ounsu.nro`, hbmenu title "ounsu!",
+  no more lazer logo as the icon (`console/osu-game/icon.jpg`, the user's own, is used if present), and the SD root
+  `/switch/ounsu` (was `/switch/osu`; existing cards need the folder renamed). The README says it's unofficial and not
+  affiliated with ppy. Inside the game, osu!'s own branding stays as ppy's code and resources draw it.

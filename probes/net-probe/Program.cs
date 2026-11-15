@@ -92,7 +92,7 @@ static partial class Program
             PooledConnectionLifetime = TimeSpan.FromMinutes(1),
         };
         var client = new HttpClient(handler) { Timeout = timeout ?? TimeSpan.FromSeconds(30) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("osu-kaihen-net-probe/1.0");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ounsu-net-probe/1.0");
         return client;
     }
 
@@ -309,7 +309,7 @@ static partial class Program
             {
                 using var handler = new SocketsHttpHandler();
                 using var c = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-                c.DefaultRequestHeaders.UserAgent.ParseAdd("osu-kaihen-net-probe/1.0");
+                c.DefaultRequestHeaders.UserAgent.ParseAdd("ounsu-net-probe/1.0");
                 using var r = await c.GetAsync("https://osu.ppy.sh/api/v2/seasonal-backgrounds");
                 string body = await r.Content.ReadAsStringAsync();
                 var skew = r.Headers.Date.HasValue ? (DateTimeOffset.UtcNow - r.Headers.Date.Value).TotalSeconds : double.NaN;

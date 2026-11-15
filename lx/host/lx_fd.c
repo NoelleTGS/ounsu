@@ -3,7 +3,7 @@
  * in-process pipes.
  *
  * Paths: the island sees a Linux file system whose root "/" is a folder on the SD card (lx_fd_init's root, e.g.
- * "sdmc:/switch/osu"). /dev/null, /dev/zero, /dev/urandom and /dev/random are built in (.NET reads /dev/urandom early,
+ * "sdmc:/switch/ounsu"). /dev/null, /dev/zero, /dev/urandom and /dev/random are built in (.NET reads /dev/urandom early,
  * Guid.NewGuid among others). /proc and /sys answer ENOENT without touching the card: the .NET GC reads
  * /proc/meminfo and /proc/self/statm on every collection, with the world stopped (HBLauncher finding).
  *

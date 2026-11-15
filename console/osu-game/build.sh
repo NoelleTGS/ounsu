@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds osu! (cut-down console build) for kaiHEN: build/osu.nro.
+# Builds ounsu! (osu! lazer, cut-down console build) for kaiHEN: build/ounsu.nro.
 #
 #   1. Symbol tables for the island's fake libdl: OpenSSL (.NET crypto, HTTPS) and FFmpeg (audio decoding).
 #   2. (skipped with LX_SKIP_PUBLISH=1, which only relinks) rd.xml regenerated from the previous build's IL (tools/gen-rdxml); the committed copy covers a first build.
@@ -58,7 +58,7 @@ python3 "$ROOT/tools/aot-island.py" "$LX_CAPTURE" "$HERE" "$HERE/build/island.o"
 
 install -m 644 "$ROOT/fsroot/usr/local/ssl/cert.pem" obj/romfs/usr/local/ssl/cert.pem
 cat > obj/romfs/lx-env <<'EOF'
-# osu-game's default environment (build.sh). Lines in /switch/osu/lx-env on the SD card come first and win.
+# osu-game's default environment (build.sh). Lines in /switch/ounsu/lx-env on the SD card come first and win.
 SDL_VIDEO_DRIVER=offscreen
 SDL_AUDIO_DRIVER=dummy
 OSU_RESOURCES_DIR=/osu-resources
@@ -66,17 +66,10 @@ EOF
 # LX_ENV_EXTRA: extra lines for a test build (e.g. LX_ENV_EXTRA="LX_TRACE=1").
 if [ -n "${LX_ENV_EXTRA:-}" ]; then printf '%s\n' $LX_ENV_EXTRA >> obj/romfs/lx-env; fi
 # The .nro's hbmenu entry. The version is the port's own (osu-game's assembly version stays 0.0.0, see CLAUDE.md).
-# The icon is osu!'s lazer icon from the osu checkout, made at build time: no osu! artwork is tracked in this repo.
 NRO_AUTHOR="NoelleTGS"
 NRO_VERSION="0.1.0"
-ICON_SRC="$ROOT/src/osu/assets/lazer.png"
 ICON_ARGS=""
-if [ -f "$ICON_SRC" ] && command -v magick >/dev/null 2>&1; then
-    magick "$ICON_SRC" -background black -alpha remove -resize 256x256 -quality 95 obj/icon.jpg
-    ICON_ARGS="ICON=$HERE/obj/icon.jpg"
-else
-    echo "build.sh: no $ICON_SRC or no ImageMagick: the .nro gets libounce's default icon"
-fi
-make -s -C "$ROOT/lx/host" ISLAND="$HERE/build/island.o" APP=osu APP_TITLE="osu!" APP_AUTHOR="$NRO_AUTHOR" \
+if [ -f "$HERE/icon.jpg" ]; then ICON_ARGS="ICON=$HERE/icon.jpg"; fi
+make -s -C "$ROOT/lx/host" ISLAND="$HERE/build/island.o" APP=ounsu APP_TITLE="ounsu!" APP_AUTHOR="$NRO_AUTHOR" \
     APP_VERSION="$NRO_VERSION" $ICON_ARGS OUT="$HERE/build" VULKAN=1 ROMFS="$HERE/obj/romfs"
-ls -la "$HERE/build/osu.nro"
+ls -la "$HERE/build/ounsu.nro"
