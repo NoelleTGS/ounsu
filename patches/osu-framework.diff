@@ -3140,7 +3140,7 @@ index 000000000..e6bd5254e
 +}
 diff --git a/osu.Framework/Audio/SDL3AudioManager.cs b/osu.Framework/Audio/SDL3AudioManager.cs
 new file mode 100644
-index 000000000..48c123d0b
+index 000000000..e94847a2d
 --- /dev/null
 +++ b/osu.Framework/Audio/SDL3AudioManager.cs
 @@ -0,0 +1,308 @@
@@ -3183,8 +3183,8 @@ index 000000000..48c123d0b
 +        {
 +            lock (sync_lock)
 +            {
-+#if HBXL_AUDIO
-+                // HBLauncher: mysoundlib is compiled into the binary (src/mysoundlib/hbxl, FFmpeg decoding only), and BASS
++#if OUNSU_AUDIO
++                // Switch 2: mysoundlib is compiled into the binary (src/mysoundlib/ounsu, FFmpeg decoding only), and BASS
 +                // is stubbed on the console: no BASS "no sound" device, no libmysoundlib.so.
 +                if (libraryPrepared)
 +                    return;
@@ -4004,15 +4004,15 @@ index 2b491b322..2080905cb 100644
          public virtual bool Looping { get; set; }
  
 diff --git a/osu.Framework/Audio/Track/TrackBass.cs b/osu.Framework/Audio/Track/TrackBass.cs
-index 21b6955fa..52f122f4d 100644
+index 21b6955fa..7ca1c54a4 100644
 --- a/osu.Framework/Audio/Track/TrackBass.cs
 +++ b/osu.Framework/Audio/Track/TrackBass.cs
 @@ -109,7 +109,13 @@ internal TrackBass(Stream data, string name, bool quick = false)
                  if (Bass.ChannelGetInfo(activeStream, out ChannelInfo info))
                      channels = info.Channels;
  
-+#if HBXL
-+                // HBLauncher (Switch 2): BASS is stubbed (every call returns 0), so a failed stream reports
++#if OUNSU
++                // Switch 2: BASS is stubbed (every call returns 0), so a failed stream reports
 +                // 0 seconds rather than -1. Without a stream handle the track isn't loaded.
 +                bool success = seconds >= 0 && activeStream != 0;
 +#else
@@ -4023,7 +4023,7 @@ index 21b6955fa..52f122f4d 100644
                  {
 diff --git a/osu.Framework/Audio/Track/TrackSDL3.cs b/osu.Framework/Audio/Track/TrackSDL3.cs
 new file mode 100644
-index 000000000..76ed5643b
+index 000000000..f97d7d959
 --- /dev/null
 +++ b/osu.Framework/Audio/Track/TrackSDL3.cs
 @@ -0,0 +1,372 @@
@@ -4082,8 +4082,8 @@ index 000000000..76ed5643b
 +            fileCallbacks = new SDL3AudioFileCallbacks(dataStream);
 +            Handle = MySoundLibrary.mslCreateTrack().ThrowIfNull();
 +
-+#if HBXL_AUDIO
-+            // HBLauncher: the first step reads the whole file from the PC's file server (see DoWork), which must not stall the audio
++#if OUNSU_AUDIO
++            // Switch 2: the first step reads the file from the SD card (see DoWork), which must not stall the audio
 +            // thread, so everything runs on the decoder thread. Length is populated after the first chunk, as IsLoaded becomes true.
 +            SDL3AudioDecoderQueue.INSTANCE.Enqueue(this);
 +#else
@@ -4098,12 +4098,12 @@ index 000000000..76ed5643b
 +
 +        private IntPtr decoder = IntPtr.Zero;
 +
-+#if HBXL_AUDIO
++#if OUNSU_AUDIO
 +        private readonly System.Diagnostics.Stopwatch loadTimer = new System.Diagnostics.Stopwatch();
 +
 +        /// <summary>
-+        /// HBLauncher: FFmpeg reads through a 4 KiB AVIO buffer, and on the console every read of a beatmap file is a round trip to
-+        /// the PC's file server (over a thousand for a typical MP3, each followed by decoding). A 64 KiB buffer cuts that ~16x.
++        /// Switch 2: FFmpeg reads through a 4 KiB AVIO buffer, and on the console every read of a beatmap file is a syscall the
++        /// host answers from the SD card (over a thousand for a typical MP3). A 64 KiB buffer cuts that ~16x.
 +        /// It stays below the large object heap threshold on purpose: copying whole files into one array (and renting 4 MiB copy
 +        /// buffers) helped fragment the console's small GC range until a 4 MiB allocation failed (OutOfMemoryException, 2026-11-09).
 +        /// </summary>
@@ -4140,7 +4140,7 @@ index 000000000..76ed5643b
 +                    dataStream = null;
 +                }
 +
-+#if HBXL_AUDIO
++#if OUNSU_AUDIO
 +                if (decoder == IntPtr.Zero)
 +                    bufferDataStream();
 +#endif
@@ -4174,7 +4174,7 @@ index 000000000..76ed5643b
 +                    isLoaded = true;
 +
 +                    cleanup();
-+#if HBXL_AUDIO
++#if OUNSU_AUDIO
 +                    Logging.Logger.Log($"TrackSDL3 {Name}: read + decoded in {loadTimer.ElapsedMilliseconds} ms");
 +#endif
 +
@@ -4823,15 +4823,15 @@ index 000000000..41a619f08
 +    }
 +}
 diff --git a/osu.Framework/Configuration/FrameworkConfigManager.cs b/osu.Framework/Configuration/FrameworkConfigManager.cs
-index 8a1f261ab..890b6d210 100644
+index 8a1f261ab..8b423213f 100644
 --- a/osu.Framework/Configuration/FrameworkConfigManager.cs
 +++ b/osu.Framework/Configuration/FrameworkConfigManager.cs
 @@ -31,6 +31,12 @@ protected override void InitialiseDefaults()
              SetDefault(FrameworkSetting.WindowedPositionX, 0.5, -0.5, 1.5);
              SetDefault(FrameworkSetting.WindowedPositionY, 0.5, -0.5, 1.5);
              SetDefault(FrameworkSetting.LastDisplayDevice, DisplayIndex.Default);
-+#if HBXL_AUDIO
-+            // HBLauncher: BASS doesn't exist on the console; SDL3 audio (PR #6002 + mysoundlib) is the only backend.
++#if OUNSU_AUDIO
++            // Switch 2: BASS doesn't exist on the console; SDL3 audio (PR #6002 + mysoundlib) is the only backend.
 +            SetDefault(FrameworkSetting.AudioDriver, AudioDriver.SDL3);
 +#else
 +            SetDefault(FrameworkSetting.AudioDriver, AudioDriver.BASS);
@@ -4951,15 +4951,15 @@ index 6fb1b4034..1439e02e7 100644
                  throw new ArgumentException($"{typeof(TData).ReadableName()} requires a packing size of 1.");
  
 diff --git a/osu.Framework/Graphics/Shaders/ShaderCompilationStore.cs b/osu.Framework/Graphics/Shaders/ShaderCompilationStore.cs
-index 9c55a270a..ba44af751 100644
+index 9c55a270a..e6becafe7 100644
 --- a/osu.Framework/Graphics/Shaders/ShaderCompilationStore.cs
 +++ b/osu.Framework/Graphics/Shaders/ShaderCompilationStore.cs
 @@ -114,6 +114,16 @@ private bool tryGetCached<T>(string filename, [NotNullWhen(true)] out T? compila
                  }
  
                  compilation = JsonConvert.DeserializeObject<T>(data)!;
-+#if HBXL
-+                if (!hbxlReflectionValid(compilation))
++#if OUNSU
++                if (!ounsuReflectionValid(compilation))
 +                {
 +                    // NativeAOT builds before Veldrid was rooted wrote SpirvReflection structs as "{}" (no field metadata);
 +                    // pipelines built from those zeroed layouts crashed the console's GPU driver.
@@ -4975,8 +4975,8 @@ index 9c55a270a..ba44af751 100644
              return false;
          }
  
-+#if HBXL
-+        private static bool hbxlReflectionValid(object? compilation)
++#if OUNSU
++        private static bool ounsuReflectionValid(object? compilation)
 +        {
 +            SpirvReflection? reflection = compilation switch
 +            {
@@ -5014,21 +5014,21 @@ index 9c55a270a..ba44af751 100644
  
          private void saveToCache(string filename, object compilation)
 diff --git a/osu.Framework/Graphics/Veldrid/Vertices/VeldridVertexUtils.cs b/osu.Framework/Graphics/Veldrid/Vertices/VeldridVertexUtils.cs
-index d863c078a..0ae40e346 100644
+index d863c078a..95db42301 100644
 --- a/osu.Framework/Graphics/Veldrid/Vertices/VeldridVertexUtils.cs
 +++ b/osu.Framework/Graphics/Veldrid/Vertices/VeldridVertexUtils.cs
 @@ -32,6 +32,17 @@ static VeldridVertexUtils()
          {
              addAttributesRecursive(typeof(T), 0);
  
-+#if HBXL
++#if OUNSU
 +            string reflected = string.Join(", ", elements.ConvertAll(e => $"{e.Name}@{e.Offset}"));
 +#endif
 +            // Veldrid assigns shader input locations in element order, which must be declaration
 +            // order. GetFields() doesn't guarantee that (NativeAOT can differ); in these sequential
 +            // structs, declaration order is byte-offset order.
 +            elements.Sort((a, b) => a.Offset.CompareTo(b.Offset));
-+#if HBXL
++#if OUNSU
 +            Logging.Logger.Log($"vertex layout {typeof(T).Name}: stride {STRIDE}, reflected [{reflected}], used [{string.Join(", ", elements.ConvertAll(e => $"{e.Name}@{e.Offset} {e.Format}"))}]");
 +#endif
 +
@@ -5036,14 +5036,14 @@ index d863c078a..0ae40e346 100644
          }
  
 diff --git a/osu.Framework/Graphics/Video/FFmpegExtensions.cs b/osu.Framework/Graphics/Video/FFmpegExtensions.cs
-index 778af3f2b..96c49b06e 100644
+index 778af3f2b..6675c7083 100644
 --- a/osu.Framework/Graphics/Video/FFmpegExtensions.cs
 +++ b/osu.Framework/Graphics/Video/FFmpegExtensions.cs
 @@ -16,8 +16,10 @@ internal static bool IsHardwarePixelFormat(this AVPixelFormat pixFmt)
                  case AVPixelFormat.AV_PIX_FMT_VDPAU:
                  case AVPixelFormat.AV_PIX_FMT_CUDA:
                  case AVPixelFormat.AV_PIX_FMT_VAAPI:
-+#if !HBXL_AUDIO // removed in FFmpeg.AutoGen 7 (HBXL builds use 7.1.1, as mysoundlib does)
++#if !OUNSU_AUDIO // removed in FFmpeg.AutoGen 7 (OUNSU builds use 7.1.1, as mysoundlib does)
                  case AVPixelFormat.AV_PIX_FMT_VAAPI_IDCT:
                  case AVPixelFormat.AV_PIX_FMT_VAAPI_MOCO:
 +#endif
@@ -5054,21 +5054,21 @@ index 778af3f2b..96c49b06e 100644
                  case AVPixelFormat.AV_PIX_FMT_MEDIACODEC:
                  case AVPixelFormat.AV_PIX_FMT_VULKAN:
                  case AVPixelFormat.AV_PIX_FMT_MMAL:
-+#if !HBXL_AUDIO // removed in FFmpeg.AutoGen 7 (HBXL builds use 7.1.1, as mysoundlib does)
++#if !OUNSU_AUDIO // removed in FFmpeg.AutoGen 7 (OUNSU builds use 7.1.1, as mysoundlib does)
                  case AVPixelFormat.AV_PIX_FMT_XVMC:
 +#endif
                      return true;
  
                  default:
 diff --git a/osu.Framework/Graphics/Video/VideoDecoder.cs b/osu.Framework/Graphics/Video/VideoDecoder.cs
-index 6b8638a80..0e1f1ead3 100644
+index 6b8638a80..a0e8180f7 100644
 --- a/osu.Framework/Graphics/Video/VideoDecoder.cs
 +++ b/osu.Framework/Graphics/Video/VideoDecoder.cs
 @@ -817,6 +817,7 @@ HardwareVideoDecoder targetHwDecoders
  
          protected virtual FFmpegFuncs CreateFuncs()
          {
-+#if !HBXL_AUDIO // FFmpeg.AutoGen 7: DynamicallyLoadedBindings resolves lib{name}.so.{version} itself (on hbxl via the fake libdl)
++#if !OUNSU_AUDIO // FFmpeg.AutoGen 7: DynamicallyLoadedBindings resolves lib{name}.so.{version} itself (on the console via the fake libdl)
              // other frameworks should handle native libraries themselves
              FFmpeg.AutoGen.ffmpeg.GetOrLoadLibrary = name =>
              {
@@ -5081,16 +5081,16 @@ index 6b8638a80..0e1f1ead3 100644
              return new FFmpegFuncs
              {
 diff --git a/osu.Framework/IO/Network/WebRequest.cs b/osu.Framework/IO/Network/WebRequest.cs
-index 4f530c3e1..86ab33a06 100644
+index 4f530c3e1..25bb777fc 100644
 --- a/osu.Framework/IO/Network/WebRequest.cs
 +++ b/osu.Framework/IO/Network/WebRequest.cs
 @@ -143,6 +143,11 @@ public class WebRequest : IDisposable
                  AutomaticDecompression = DecompressionMethods.All,
                  DefaultProxyCredentials = RuntimeInfo.OS == RuntimeInfo.Platform.Windows ? CredentialCache.DefaultCredentials : null,
                  ConnectCallback = onConnect,
-+#if HBXL
-+                // Switch 2 (hbxl): HTTP/1.1 means one socket per in-flight request, and SmileBASIC's socket service has a
-+                // small pool shared with the file server.  Also keeps a thumbnail-heavy listing gentle on ppy's servers.
++#if OUNSU
++                // Switch 2: HTTP/1.1 means one socket per in-flight request, and the console's socket service has a small
++                // pool.  Also keeps a thumbnail-heavy listing gentle on ppy's servers.
 +                MaxConnectionsPerServer = 8,
 +#endif
              }
@@ -5110,7 +5110,7 @@ index 28e6a6744..15e0bb18d 100644
              if (name == null)
                  return null;
 diff --git a/osu.Framework/Platform/GameHost.cs b/osu.Framework/Platform/GameHost.cs
-index 967eef90f..2b4efe6f7 100644
+index 967eef90f..56fe12d00 100644
 --- a/osu.Framework/Platform/GameHost.cs
 +++ b/osu.Framework/Platform/GameHost.cs
 @@ -527,6 +527,7 @@ protected virtual void DrawFrame()
@@ -5125,8 +5125,8 @@ index 967eef90f..2b4efe6f7 100644
                      break;
  
                  case RuntimeInfo.Platform.Linux:
-+#if HBXL
-+                    // HBLauncher (Switch 2): Vulkan only, no OpenGL.
++#if OUNSU
++                    // Switch 2: Vulkan only, no OpenGL.
 +                    yield return RendererType.Deferred_Vulkan;
 +                    yield return RendererType.Vulkan;
 +#else
@@ -5137,47 +5137,6 @@ index 967eef90f..2b4efe6f7 100644
  
                      break;
  
-diff --git a/osu.Framework/Platform/HbxlNative.cs b/osu.Framework/Platform/HbxlNative.cs
-new file mode 100644
-index 000000000..6ae11ac09
---- /dev/null
-+++ b/osu.Framework/Platform/HbxlNative.cs
-@@ -0,0 +1,35 @@
-+// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-+// See the LICENCE file in the repository root for full licence text.
-+
-+#if HBXL
-+using System;
-+using System.Runtime.InteropServices;
-+
-+namespace osu.Framework.Platform
-+{
-+    /// <summary>
-+    /// Entry points of HBLauncher's Linux runtime (hbxl, Switch 2), bound at link time
-+    /// (DirectPInvoke "hbxl").
-+    /// </summary>
-+    internal static partial class HbxlNative
-+    {
-+        [LibraryImport("hbxl", EntryPoint = "hbx_switch2_vi_window")]
-+        internal static partial IntPtr ViWindow();
-+
-+        [LibraryImport("hbxl", EntryPoint = "hbx_switch2_display")]
-+        private static unsafe partial void hbx_switch2_display(uint* out5);
-+
-+        /// <summary>
-+        /// The console's window now: its size in this console mode (docked or handheld), the frame rate it presents at,
-+        /// and a serial that changes with any of them. Also lets the runtime handle the console's applet messages
-+        /// (docking), so the window thread calls it once per frame.
-+        /// </summary>
-+        internal static unsafe (int Width, int Height, int FrameRate, uint Serial) Display()
-+        {
-+            uint* d = stackalloc uint[5];
-+            hbx_switch2_display(d);
-+            return ((int)d[0], (int)d[1], (int)d[3], d[4]);
-+        }
-+    }
-+}
-+#endif
 diff --git a/osu.Framework/Platform/Linux/Native/Library.cs b/osu.Framework/Platform/Linux/Native/Library.cs
 index fda59d2d0..c5bd766fd 100644
 --- a/osu.Framework/Platform/Linux/Native/Library.cs
@@ -5194,21 +5153,21 @@ index fda59d2d0..c5bd766fd 100644
              foreach (string path in paths.Split(':'))
              {
 diff --git a/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs b/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs
-index b615f92b6..60f0bbe94 100644
+index b615f92b6..498ae1ed5 100644
 --- a/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs
 +++ b/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs
 @@ -62,6 +62,16 @@ private unsafe void setupWindowing(FrameworkConfigManager config)
  
              config.BindWith(FrameworkSetting.WindowedSize, sizeWindowed);
  
-+#if HBXL
++#if OUNSU
 +            // Switch 2: the swapchain must match the console's window, whose size depends on the console mode (docked:
 +            // the TV's, handheld: the screen's, or the "Switch 2" Display settings). Pin the size to it, whatever
-+            // framework.ini says; followHbxlDisplay keeps it pinned when the mode changes.
-+            var hbxlDisplay = HbxlNative.Display();
-+            hbxlDisplaySerial = hbxlDisplay.Serial;
-+            hbxlFrameRate = hbxlDisplay.FrameRate;
-+            pinWindowedSize(new Size(hbxlDisplay.Width, hbxlDisplay.Height));
++            // framework.ini says; followOunsuDisplay keeps it pinned when the mode changes.
++            var ounsuDisplay = OunsuNative.Display();
++            ounsuDisplaySerial = ounsuDisplay.Serial;
++            ounsuFrameRate = ounsuDisplay.FrameRate;
++            pinWindowedSize(new Size(ounsuDisplay.Width, ounsuDisplay.Height));
 +#endif
 +
              sizeWindowed.MinValueChanged += min =>
@@ -5218,7 +5177,7 @@ index b615f92b6..60f0bbe94 100644
  
              WindowMode.BindValueChanged(evt =>
              {
-+#if HBXL
++#if OUNSU
 +                // See SupportedWindowModes: anything else would recreate the swapchain at the offscreen
 +                // driver's fake 1024x768 display mode, which the console never shows (and hangs presenting).
 +                if (evt.NewValue != Configuration.WindowMode.Windowed)
@@ -5231,13 +5190,13 @@ index b615f92b6..60f0bbe94 100644
                  switch (evt.NewValue)
                  {
                      case Configuration.WindowMode.Fullscreen:
-@@ -142,15 +162,72 @@ protected set
+@@ -142,15 +162,71 @@ protected set
  
          public WindowMode DefaultWindowMode => RuntimeInfo.IsMobile ? Configuration.WindowMode.Fullscreen : Configuration.WindowMode.Windowed;
  
-+#if HBXL
-+        private uint hbxlDisplaySerial;
-+        private static int hbxlFrameRate = 60; // static: tryFetchDisplayMode is (there is one window)
++#if OUNSU
++        private uint ounsuDisplaySerial;
++        private static int ounsuFrameRate = 60; // static: tryFetchDisplayMode is (there is one window)
 +
 +        /// <summary>
 +        /// Pins the windowed size to the console window's size. Min/max are moved in the order that keeps min &lt;= max.
@@ -5263,23 +5222,23 @@ index b615f92b6..60f0bbe94 100644
 +        /// resizes the SDL window, whose resize event resizes the swapchain; a new frame rate updates the display mode,
 +        /// which the frame limiters follow.
 +        /// </summary>
-+        private void followHbxlDisplay()
++        private void followOunsuDisplay()
 +        {
-+            var d = HbxlNative.Display();
-+            if (d.Serial == hbxlDisplaySerial)
++            var d = OunsuNative.Display();
++            if (d.Serial == ounsuDisplaySerial)
 +                return;
 +
-+            hbxlDisplaySerial = d.Serial;
++            ounsuDisplaySerial = d.Serial;
 +            Logger.Log($"Switch 2 window: {d.Width}x{d.Height} at {d.FrameRate} fps");
 +
 +            if (d.Width != sizeWindowed.Value.Width || d.Height != sizeWindowed.Value.Height)
 +                pinWindowedSize(new Size(d.Width, d.Height));
 +
-+            if (d.FrameRate != hbxlFrameRate)
++            if (d.FrameRate != ounsuFrameRate)
 +            {
-+                hbxlFrameRate = d.FrameRate;
++                ounsuFrameRate = d.FrameRate;
 +                var m = currentDisplayMode.Value;
-+                currentDisplayMode.Value = new DisplayMode(m.Format, m.Size, m.BitsPerPixel, hbxlFrameRate, m.DisplayIndex);
++                currentDisplayMode.Value = new DisplayMode(m.Format, m.Size, m.BitsPerPixel, ounsuFrameRate, m.DisplayIndex);
 +            }
 +        }
 +#endif
@@ -5289,10 +5248,9 @@ index b615f92b6..60f0bbe94 100644
          {
              get
              {
-+#if HBXL
-+                // HBLauncher (Switch 2): the console only shows the first swapchain made on the launcher's
-+                // 1920x1080 vi window. The window is pinned to that size (setupWindowing), and it already
-+                // covers the whole screen, so "windowed" is the only mode. osu! defaults to Fullscreen,
++#if OUNSU
++                // Switch 2: the window is pinned to the console's vi window size (setupWindowing,
++                // followOunsuDisplay), and it already covers the whole screen, so "windowed" is the only mode. osu! defaults to Fullscreen,
 +                // which on SDL's offscreen driver means a 1024x768 swapchain that is never displayed.
 +                return new[] { Configuration.WindowMode.Windowed };
 +#else
@@ -5304,30 +5262,30 @@ index b615f92b6..60f0bbe94 100644
              }
          }
  
-@@ -764,6 +841,10 @@ private static unsafe bool tryFetchDisplayMode(SDL_Window* windowHandle, WindowS
+@@ -764,6 +840,10 @@ private static unsafe bool tryFetchDisplayMode(SDL_Window* windowHandle, WindowS
              if (mode != null)
              {
                  displayMode = mode->ToDisplayMode(display.Index);
-+#if HBXL
++#if OUNSU
 +                // SDL's offscreen driver knows no refresh rate: the frame limiters use the console window's.
-+                displayMode = new DisplayMode(displayMode.Format, displayMode.Size, displayMode.BitsPerPixel, hbxlFrameRate, displayMode.DisplayIndex);
++                displayMode = new DisplayMode(displayMode.Format, displayMode.Size, displayMode.BitsPerPixel, ounsuFrameRate, displayMode.DisplayIndex);
 +#endif
                  Logger.Log($"Updated display mode to {type} resolution: {mode->w}x{mode->h}@{mode->refresh_rate}, {displayMode.Format}");
                  return true;
              }
 diff --git a/osu.Framework/Platform/SDL3/SDL3Window.cs b/osu.Framework/Platform/SDL3/SDL3Window.cs
-index 43af122d1..75e163696 100644
+index 43af122d1..3642b577a 100644
 --- a/osu.Framework/Platform/SDL3/SDL3Window.cs
 +++ b/osu.Framework/Platform/SDL3/SDL3Window.cs
 @@ -94,6 +94,12 @@ public IntPtr WindowHandle
                  if (SDLWindowHandle == null)
                      return IntPtr.Zero;
  
-+#if HBXL
-+                // HBLauncher (Switch 2): SDL runs on the offscreen video driver; the real
-+                // display is the launcher's vi window, presented to as a "Wayland surface"
-+                // (hbxl_vk_shim.c maps it onto VK_NN_vi_surface).
-+                return HbxlNative.ViWindow();
++#if OUNSU
++                // Switch 2: SDL runs on the offscreen video driver; the real display is the
++                // console's vi window, presented to as a "Wayland surface" (ounsu!'s
++                // lx/dotnet/lx_vk.c maps it onto VK_NN_vi_surface).
++                return OunsuNative.ViWindow();
 +#else
                  var props = SDL_GetWindowProperties(SDLWindowHandle);
                  if (props == 0)
@@ -5344,8 +5302,8 @@ index 43af122d1..75e163696 100644
                  if (SDLWindowHandle == null)
                      return IntPtr.Zero;
  
-+#if HBXL
-+                return 1; // any non-null "wl_display": hbxl_vk_shim.c ignores it
++#if OUNSU
++                return 1; // any non-null "wl_display": lx_vk.c ignores it
 +#else
                  var props = SDL_GetWindowProperties(SDLWindowHandle);
                  if (props == 0)
@@ -5362,7 +5320,7 @@ index 43af122d1..75e163696 100644
                            SDL3 Revision: {SDL_GetRevision()}
                            SDL3 Video driver: {SDL_GetCurrentVideoDriver()}");
  
-+#if HBXL
++#if OUNSU
 +            IsWayland = true;
 +#else
              IsWayland = SDL_GetCurrentVideoDriver() == "wayland";
@@ -5374,15 +5332,15 @@ index 43af122d1..75e163696 100644
  
              pollSDLEvents();
  
-+#if HBXL
-+            followHbxlDisplay();
++#if OUNSU
++            followOunsuDisplay();
 +#endif
 +
              if (!cursorInWindow.Value)
                  pollMouse();
  
 diff --git a/osu.Framework/Threading/AudioThread.cs b/osu.Framework/Threading/AudioThread.cs
-index 7b7ca5c41..f032a6e40 100644
+index 7b7ca5c41..43ba6b243 100644
 --- a/osu.Framework/Threading/AudioThread.cs
 +++ b/osu.Framework/Threading/AudioThread.cs
 @@ -78,7 +78,8 @@ internal void RegisterManager(AudioManager manager)
@@ -5409,12 +5367,12 @@ index 7b7ca5c41..f032a6e40 100644
          /// </summary>
          internal static void PreloadBass()
          {
-+#if HBXL
-+            // HBLauncher (Switch 2): everything is linked statically (no dlopen), and
++#if OUNSU
++            // Switch 2: everything is linked statically (no dlopen), and
 +            // NATIVE_DLL_SEARCH_DIRECTORIES is unset under NativeAOT.
 +            return;
 +#endif
-+#pragma warning disable CS0162 // unreachable under HBXL
++#pragma warning disable CS0162 // unreachable under OUNSU
              if (RuntimeInfo.OS == RuntimeInfo.Platform.Linux)
              {
                  // required for the time being to address libbass_fx.so load failures (see https://github.com/ppy/osu/issues/2852)
@@ -5425,7 +5383,7 @@ index 7b7ca5c41..f032a6e40 100644
  
          private bool attemptWasapiInitialisation()
 diff --git a/osu.Framework/Timing/ThrottledFrameClock.cs b/osu.Framework/Timing/ThrottledFrameClock.cs
-index 4be49407e..22ec42551 100644
+index 4be49407e..c3d5baa27 100644
 --- a/osu.Framework/Timing/ThrottledFrameClock.cs
 +++ b/osu.Framework/Timing/ThrottledFrameClock.cs
 @@ -76,7 +76,17 @@ private double sleepAndUpdateCurrent(double milliseconds)
@@ -5433,8 +5391,8 @@ index 4be49407e..22ec42551 100644
              // Not 100% sure if we want to do this, but let's give it a try.
              if (milliseconds <= 0)
 +            {
-+#if HBXL
-+                // HBLauncher (Switch 2) has no signals, so the GC can only suspend a thread at a safepoint
++#if OUNSU
++                // The Switch 2 port has no signals, so the GC can only suspend a thread at a safepoint
 +                // (a P/Invoke transition, an allocation slow path). A game thread that is "not keeping up"
 +                // skips the sleep, allocates nothing in steady state and so never reaches one: a pending
 +                // GC then waits forever and every other thread blocks in RhpWaitForGC2 (hardware hang
@@ -5447,26 +5405,26 @@ index 4be49407e..22ec42551 100644
              double before = CurrentTime;
  
 diff --git a/osu.Framework/osu.Framework.csproj b/osu.Framework/osu.Framework.csproj
-index 74d803315..c55bd92f4 100644
+index 74d803315..76fa4ef85 100644
 --- a/osu.Framework/osu.Framework.csproj
 +++ b/osu.Framework/osu.Framework.csproj
 @@ -11,7 +11,20 @@
      <!--<GenerateDocumentationFile>true</GenerateDocumentationFile>-->
      <NoWarn>$(NoWarn);CS1591;NU5104</NoWarn>
      <DefineConstants>$(DefineConstants);JETBRAINS_ANNOTATIONS</DefineConstants>
-+    <!-- HBLauncher (Switch 2) console build: dotnet publish -p:HbxlBuild=true -->
-+    <DefineConstants Condition="'$(HbxlBuild)' == 'true'">$(DefineConstants);HBXL</DefineConstants>
++    <!-- ounsu! (Switch 2) console build: dotnet publish -p:OunsuBuild=true -->
++    <DefineConstants Condition="'$(OunsuBuild)' == 'true'">$(DefineConstants);OUNSU</DefineConstants>
    </PropertyGroup>
 +  <PropertyGroup>
-+    <!-- HBLauncher audio (PR #6002 SDL3 backend): on for the console build, and for desktop comparison builds
-+         with -p:HbxlAudio=true. -->
-+    <HbxlAudio Condition="'$(HbxlAudio)' == '' And '$(HbxlBuild)' == 'true'">true</HbxlAudio>
-+    <DefineConstants Condition="'$(HbxlAudio)' == 'true'">$(DefineConstants);HBXL_AUDIO</DefineConstants>
++    <!-- Console audio (PR #6002 SDL3 backend): on for the console build, and for desktop comparison builds
++         with -p:OunsuAudio=true. -->
++    <OunsuAudio Condition="'$(OunsuAudio)' == '' And '$(OunsuBuild)' == 'true'">true</OunsuAudio>
++    <DefineConstants Condition="'$(OunsuAudio)' == 'true'">$(DefineConstants);OUNSU_AUDIO</DefineConstants>
 +  </PropertyGroup>
-+  <ItemGroup Condition="'$(HbxlAudio)' == 'true'">
-+    <!-- mysoundlib bindings + library as one managed assembly (../mysoundlib/hbxl); its msl* exports are bound
++  <ItemGroup Condition="'$(OunsuAudio)' == 'true'">
++    <!-- mysoundlib bindings + library as one managed assembly (../mysoundlib/ounsu); its msl* exports are bound
 +         by DirectPInvoke in the app (see console/osu-game/osu-game.csproj). -->
-+    <ProjectReference Include="../../mysoundlib/hbxl/mysoundlib-hbxl.csproj" />
++    <ProjectReference Include="../../mysoundlib/ounsu/mysoundlib-ounsu.csproj" />
 +  </ItemGroup>
    <PropertyGroup Label="Nuget">
      <Title>osu!framework</Title>
@@ -5476,10 +5434,10 @@ index 74d803315..c55bd92f4 100644
    </PropertyGroup>
    <ItemGroup Label="Package References">
 -    <PackageReference Include="FFmpeg.AutoGen" Version="4.3.0.1" />
-+    <PackageReference Include="FFmpeg.AutoGen" Version="4.3.0.1" Condition="'$(HbxlAudio)' != 'true'" />
-+    <!-- HBXL audio: mysoundlib (FFmpeg.AutoGen 7.1.1) is compiled into the same binary, so the framework's video
++    <PackageReference Include="FFmpeg.AutoGen" Version="4.3.0.1" Condition="'$(OunsuAudio)' != 'true'" />
++    <!-- OUNSU audio: mysoundlib (FFmpeg.AutoGen 7.1.1) is compiled into the same binary, so the framework's video
 +         code moves to the same bindings version (both assemblies are called FFmpeg.AutoGen). -->
-+    <PackageReference Include="FFmpeg.AutoGen" Version="7.1.1" Condition="'$(HbxlAudio)' == 'true'" />
++    <PackageReference Include="FFmpeg.AutoGen" Version="7.1.1" Condition="'$(OunsuAudio)' == 'true'" />
      <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="10.0.11" />
      <PackageReference Include="ppy.managed-midi" Version="1.10.2" />
      <PackageReference Include="ppy.ManagedBass" Version="2022.1216.0" />
@@ -5487,7 +5445,48 @@ index 74d803315..c55bd92f4 100644
      <PackageReference Include="ppy.SDL2-CS" Version="1.0.741-alpha" />
      <PackageReference Include="ppy.SDL3-CS" Version="2026.1002.1" />
      <PackageReference Include="ppy.osu.Framework.SourceGeneration" Version="2025.1121.1" />
-+    <PackageReference Include="com.github.hwsmm.mysoundlib" Version="0.0.0.1" Condition="'$(HbxlAudio)' != 'true'" />
++    <PackageReference Include="com.github.hwsmm.mysoundlib" Version="0.0.0.1" Condition="'$(OunsuAudio)' != 'true'" />
  
      <!-- DO NOT use ProjectReference for native packaging project.
           See https://github.com/NuGet/Home/issues/4514 and https://github.com/dotnet/sdk/issues/765 . -->
+diff --git a/osu.Framework/Platform/OunsuNative.cs b/osu.Framework/Platform/OunsuNative.cs
+new file mode 100644
+index 000000000..b654ba8e7
+--- /dev/null
++++ b/osu.Framework/Platform/OunsuNative.cs
+@@ -0,0 +1,35 @@
++// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
++// See the LICENCE file in the repository root for full licence text.
++
++#if OUNSU
++using System;
++using System.Runtime.InteropServices;
++
++namespace osu.Framework.Platform
++{
++    /// <summary>
++    /// The console's window, from ounsu!'s native glue (console/osu-game/shim/lx_osu.c), bound at link time
++    /// (DirectPInvoke "ounsu").
++    /// </summary>
++    internal static partial class OunsuNative
++    {
++        [LibraryImport("ounsu", EntryPoint = "ounsu_vi_window")]
++        internal static partial IntPtr ViWindow();
++
++        [LibraryImport("ounsu", EntryPoint = "ounsu_display")]
++        private static unsafe partial void ounsu_display(uint* out5);
++
++        /// <summary>
++        /// The console's window now: its size in this console mode (docked or handheld), the frame rate it presents at,
++        /// and a serial that changes with any of them. Also lets the runtime handle the console's applet messages
++        /// (docking), so the window thread calls it once per frame.
++        /// </summary>
++        internal static unsafe (int Width, int Height, int FrameRate, uint Serial) Display()
++        {
++            uint* d = stackalloc uint[5];
++            ounsu_display(d);
++            return ((int)d[0], (int)d[1], (int)d[3], d[4]);
++        }
++    }
++}
++#endif

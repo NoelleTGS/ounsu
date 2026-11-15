@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Mirror a folder from the PC to the console's SD card over FTP (ounceshell's FTP server, port 1337).
 
-    python3 tools/ftp-upload.py LOCAL_DIR REMOTE_DIR [--host 192.168.1.177] [--port 1337]
-    python3 tools/ftp-upload.py --list REMOTE_DIR
+    python3 tools/ftp-upload.py LOCAL_DIR REMOTE_DIR --host CONSOLE_IP [--port 1337]
+    python3 tools/ftp-upload.py --list REMOTE_DIR --host CONSOLE_IP
 
 Files that already exist remotely with the same size are skipped, so an interrupted upload can simply be run again.
 Directories are created as needed. Standard library only (ftplib), one connection.
 
-Example: python3 tools/ftp-upload.py fsroot/osu-resources /switch/ounsu/osu-resources
+Example: python3 tools/ftp-upload.py fsroot/osu-resources /switch/ounsu/osu-resources --host 192.168.1.50
 (ounceshell may show the SD card under a device prefix such as "sdmc:"; check with --list / first.)
 Only CWD, plain LIST, MKD and STOR with bare names are used: the server crashed on a LIST with a path argument.
 """
@@ -63,7 +63,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("local", nargs="?")
     ap.add_argument("remote", nargs="?")
-    ap.add_argument("--host", default="192.168.1.177")
+    ap.add_argument("--host", required=True, help="the console's IP address (ounceshell shows it)")
     ap.add_argument("--port", type=int, default=1337)
     ap.add_argument("--list", metavar="REMOTE_DIR")
     a = ap.parse_args()

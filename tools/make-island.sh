@@ -8,13 +8,13 @@
 # lx_island_main, and no undefined symbols: everything else is local, so the island's libc can't meet newlib in the
 # final link.
 #
-# LX_MUSL_TOOLCHAIN: the musl toolchain (default ~/osu-HBLauncher/toolchain-src/toolchain: GCC 15.1 + musl 1.2.6 with
-# the hbx syscall hooks).
+# LX_MUSL_TOOLCHAIN: the musl toolchain (default: toolchain/ in this repository; GCC 15.1 + musl 1.2.6 with the
+# syscall hooks, patches/musl.md).
 set -eu
 
 [ $# -ge 2 ] || { echo "usage: $0 OUT.o INPUT..." >&2; exit 2; }
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TC=${LX_MUSL_TOOLCHAIN:-$HOME/osu-HBLauncher/toolchain-src/toolchain}
+TC=${LX_MUSL_TOOLCHAIN:-$ROOT/toolchain}
 CC="$TC/bin/aarch64-linux-musl-gcc"
 OBJCOPY="$TC/bin/aarch64-linux-musl-objcopy"
 NM="$TC/bin/aarch64-linux-musl-nm"

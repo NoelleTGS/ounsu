@@ -33,7 +33,7 @@ static partial class Program
         }
     }
 
-    private static readonly string host = Environment.GetEnvironmentVariable("NETPROBE_HOST") ?? "192.168.1.206";
+    private static readonly string host = Environment.GetEnvironmentVariable("NETPROBE_HOST") ?? "127.0.0.1"; // build.sh puts the server's address in lx-env
     // Desktop runs: NETPROBE_ROOT=<folder with net-probe/ca.pem> (on the console "/" is the island's root; the CA comes
     // from the .nro's romfs).
     private static readonly string root = Environment.GetEnvironmentVariable("NETPROBE_ROOT") ?? "";

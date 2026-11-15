@@ -1,18 +1,18 @@
 diff --git a/bindings/MySoundLibrary.cs b/bindings/MySoundLibrary.cs
-index ea89322..ffc939f 100644
+index ea89322..73351c3 100644
 --- a/bindings/MySoundLibrary.cs
 +++ b/bindings/MySoundLibrary.cs
 @@ -146,11 +146,15 @@ namespace mysoundlib_cs
          public static extern void mslTrackSetFreqTempo(IntPtr track, double freq, double tempo);
  
          [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
-+#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
++#if !OUNSU_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
          [SuppressGCTransition]
 +#endif
          public static extern byte mslTrackIsLoaded(IntPtr track);
  
          [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
-+#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
++#if !OUNSU_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
          [SuppressGCTransition]
 +#endif
          public static extern byte mslTrackIsDone(IntPtr track);
@@ -22,7 +22,7 @@ index ea89322..ffc939f 100644
          public static extern void mslTrackPause(IntPtr track);
  
          [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
-+#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
++#if !OUNSU_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
          [SuppressGCTransition]
 +#endif
          public static extern byte mslTrackIsPlaying(IntPtr track);
@@ -31,7 +31,7 @@ index ea89322..ffc939f 100644
          public static extern void mslTrackSetVolume(IntPtr track, double volume, double balance);
  
          [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
-+#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
++#if !OUNSU_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
          [SuppressGCTransition]
 +#endif
          public static extern double mslTrackGetPosition(IntPtr track);
@@ -41,7 +41,7 @@ index ea89322..ffc939f 100644
          public static extern void mslSamplePause(IntPtr sample);
  
          [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
-+#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
++#if !OUNSU_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
          [SuppressGCTransition]
 +#endif
          public static extern byte mslSampleIsPlaying(IntPtr sample);
@@ -51,21 +51,21 @@ index ea89322..ffc939f 100644
          public static extern void mslSampleSetFrequency(IntPtr sample, double rfreq);
  
          [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
-+#if !HBXL_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
++#if !OUNSU_IN_PROCESS // one runtime: the callee is managed code and needs the GC transition
          [SuppressGCTransition]
 +#endif
          public static extern byte mslSampleGetLoop(IntPtr sample);
  
          [DllImport(lib_name, CallingConvention = CallingConvention.Cdecl)]
 diff --git a/library/Decoder.cs b/library/Decoder.cs
-index 3d20a47..ac6cc66 100644
+index 3d20a47..3f4645c 100644
 --- a/library/Decoder.cs
 +++ b/library/Decoder.cs
 @@ -1,7 +1,9 @@
  /* SPDX-License-Identifier: LGPL-2.1-only */
  
  using FFmpeg.AutoGen;
-+#if !HBXL_NO_BASS
++#if !OUNSU_NO_BASS
  using ManagedBass;
 +#endif
  using SDL;
@@ -75,7 +75,7 @@ index 3d20a47..ac6cc66 100644
      {
          public static Decoder CreateDecoderWithPath(string filePath, DataCallback callback, SDL_AudioSpec audioSpec, bool isTrack)
          {
-+#if HBXL_NO_BASS
++#if OUNSU_NO_BASS
 +            return new FFmpegDecoder(filePath, callback, audioSpec);
 +#else
              return Bass.CurrentDevice >= 0
@@ -88,7 +88,7 @@ index 3d20a47..ac6cc66 100644
              avio_alloc_context_seek_func seek,
              DataCallback dataCallback, SDL_AudioSpec audioSpec, bool isTrack)
          {
-+#if HBXL_NO_BASS
++#if OUNSU_NO_BASS
 +            return new FFmpegDecoder(opaque, read, seek, dataCallback, audioSpec);
 +#else
              return Bass.CurrentDevice >= 0
@@ -99,7 +99,7 @@ index 3d20a47..ac6cc66 100644
  
          public delegate void DataCallback(ReadOnlySpan<byte> data, bool done);
 diff --git a/library/Mixer.cs b/library/Mixer.cs
-index ff996d9..13dfcce 100644
+index ff996d9..1eebca7 100644
 --- a/library/Mixer.cs
 +++ b/library/Mixer.cs
 @@ -57,7 +57,9 @@ namespace native_audio_library
@@ -107,14 +107,14 @@ index ff996d9..13dfcce 100644
              lock (syncRoot)
              {
 -                if (ret == null || sampleCount < ret.Length)
-+                // HBXL fix: the upstream check was inverted (sampleCount < ret.Length), so the buffer shrank on smaller requests
++                // OUNSU fix: the upstream check was inverted (sampleCount < ret.Length), so the buffer shrank on smaller requests
 +                // and never grew: with SDL resampling 44.1 -> 48 kHz the request size varies, and every larger one overflowed.
 +                if (ret == null || ret.Length < sampleCount)
                      ret = new float[sampleCount];
  
                  bool useFilters = activeEffects.Count > 0;
 diff --git a/library/NativeAudioLibrary.cs b/library/NativeAudioLibrary.cs
-index 3bbf735..a05551f 100644
+index 3bbf735..0470e5e 100644
 --- a/library/NativeAudioLibrary.cs
 +++ b/library/NativeAudioLibrary.cs
 @@ -1,727 +1,733 @@
@@ -848,7 +848,7 @@ index 3bbf735..a05551f 100644
 +/* SPDX-License-Identifier: LGPL-2.1-only */
 +
 +using FFmpeg.AutoGen;
-+#if !HBXL_NO_BASS
++#if !OUNSU_NO_BASS
 +using ManagedBass;
 +using ManagedBass.Mix;
 +#endif
@@ -980,7 +980,7 @@ index 3bbf735..a05551f 100644
 +            loadSym = sym;
 +            closeLib = close;
 +
-+#if !HBXL_NO_BASS // HBXL: one binary; SDL3 is the host's (osu-framework's) and already bound
++#if !OUNSU_NO_BASS // OUNSU: one binary; SDL3 is the host's (osu-framework's) and already bound
 +            NativeLibrary.SetDllImportResolver(typeof(SDL3).Assembly, (name, _, _) => LoadNativeLibrary(name));
 +            NativeLibrary.SetDllImportResolver(typeof(Bass).Assembly, (name, _, _) => LoadNativeLibrary(name));
 +            NativeLibrary.SetDllImportResolver(typeof(BassMix).Assembly, (name, _, _) => LoadNativeLibrary(name));
@@ -1049,7 +1049,7 @@ index 3bbf735..a05551f 100644
 +
 +            switch (driver)
 +            {
-+#if !HBXL_NO_BASS
++#if !OUNSU_NO_BASS
 +                case "asio":
 +                    return AllocHandle(new NAudioAsioManager());
 +#endif
@@ -1579,7 +1579,7 @@ index 3bbf735..a05551f 100644
 +    }
 +}
 diff --git a/library/TrackSDL3AudioPlayer.cs b/library/TrackSDL3AudioPlayer.cs
-index e45a393..9b9d5a0 100644
+index e45a393..651cbd0 100644
 --- a/library/TrackSDL3AudioPlayer.cs
 +++ b/library/TrackSDL3AudioPlayer.cs
 @@ -1,5 +1,6 @@
@@ -1593,8 +1593,8 @@ index e45a393..9b9d5a0 100644
          /// <summary>
          /// Stores raw audio data.
          /// </summary>
-+#if HBXL_IN_PROCESS
-+        // HBXL: whole decoded tracks live in the console's small managed heap: 16-bit PCM in 64 KiB segments (see SegmentedPcm).
++#if OUNSU_IN_PROCESS
++        // OUNSU: whole decoded tracks live in the console's small managed heap: 16-bit PCM in 64 KiB segments (see SegmentedPcm).
 +        protected SegmentedPcm? AudioData;
 +
 +        private const float s16_to_float = 1f / 32768f;
@@ -1608,7 +1608,7 @@ index e45a393..9b9d5a0 100644
              if (wanted <= AudioData?.LongLength)
                  return;
  
-+#if HBXL_IN_PROCESS
++#if OUNSU_IN_PROCESS
 +            lock (SyncLock)
 +            {
 +                AudioData ??= new SegmentedPcm();
@@ -1630,7 +1630,7 @@ index e45a393..9b9d5a0 100644
              int floatLen = next.Length / sizeof(float);
              long currentLen = AudioRawLength;
  
-+#if HBXL_IN_PROCESS
++#if OUNSU_IN_PROCESS
 +            // Segments grow without copying (upstream re-allocated and copied the whole song for every frame decoded past FFmpeg's
 +            // duration estimate, which is often short for MP3s).
 +            if (currentLen + floatLen > AudioData.LongLength)
@@ -1654,7 +1654,7 @@ index e45a393..9b9d5a0 100644
                              }
  
                              // swap stereo channel
-+#if HBXL_IN_PROCESS
++#if OUNSU_IN_PROCESS
 +                            data[read + 1 + offset] = AudioData[AudioDataPosition--] * s16_to_float;
 +                            data[read + offset] = AudioData[AudioDataPosition--] * s16_to_float;
 +#else
@@ -1668,7 +1668,7 @@ index e45a393..9b9d5a0 100644
                          long remain = dataLength - AudioDataPosition;
                          int wrote = (int)Math.Min(needed, remain);
  
-+#if HBXL_IN_PROCESS
++#if OUNSU_IN_PROCESS
 +                        AudioData.CopyOut(AudioDataPosition, data, offset, wrote);
 +#else
                          Array.Copy(AudioData, AudioDataPosition, data, offset, wrote);
@@ -1680,7 +1680,7 @@ index e45a393..9b9d5a0 100644
  
              long final = Math.Min(data.Length, remain);
  
-+#if HBXL_IN_PROCESS
++#if OUNSU_IN_PROCESS
 +            AudioData.CopyOut(start, data, 0, (int)final);
 +#else
              Array.Copy(AudioData, start, data, 0, final);
@@ -1688,56 +1688,19 @@ index e45a393..9b9d5a0 100644
              return final;
          }
  
-diff --git a/hbxl/mysoundlib-hbxl.csproj b/hbxl/mysoundlib-hbxl.csproj
-new file mode 100644
-index 0000000..4b9a449
---- /dev/null
-+++ b/hbxl/mysoundlib-hbxl.csproj
-@@ -0,0 +1,31 @@
-+<Project Sdk="Microsoft.NET.Sdk">
-+  <!-- HBLauncher (Switch 2) build of mysoundlib: bindings (mysoundlib_cs) and library (native_audio_library) in one
-+       managed assembly, compiled into the app by NativeAOT instead of being loaded as libmysoundlib.so.
-+       The bindings' DllImport("mysoundlib") calls resolve to the library's [UnmanagedCallersOnly(EntryPoint = "msl...")]
-+       exports through DirectPInvoke + UnmanagedEntryPointsAssembly in the app project.
-+       BASS decoding and ASIO output are left out (HBXL_NO_BASS): FFmpeg decodes, SDL3 plays.
-+       HBXL_IN_PROCESS drops the bindings' [SuppressGCTransition]: the callee is managed code in the same runtime, and
-+       entering it without the transition is a fail-fast ("attempted to call a UnmanagedCallersOnly method"). -->
-+  <PropertyGroup>
-+    <TargetFramework>net10.0</TargetFramework>
-+    <AssemblyName>mysoundlib-hbxl</AssemblyName>
-+    <RootNamespace>native_audio_library</RootNamespace>
-+    <ImplicitUsings>enable</ImplicitUsings>
-+    <Nullable>enable</Nullable>
-+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-+    <IsAotCompatible>true</IsAotCompatible>
-+    <DefineConstants>$(DefineConstants);HBXL_NO_BASS;HBXL_IN_PROCESS</DefineConstants>
-+    <NoWarn>$(NoWarn);CS1591</NoWarn>
-+  </PropertyGroup>
-+  <ItemGroup>
-+    <Compile Include="../bindings/*.cs" />
-+    <Compile Include="../library/*.cs" Exclude="../library/BassDecoder.cs;../library/NAudioAsioManager.cs" />
-+  </ItemGroup>
-+  <ItemGroup>
-+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
-+    <!-- Same version as osu.Framework's. -->
-+    <PackageReference Include="ppy.SDL3-CS" Version="2026.1002.1" />
-+    <PackageReference Include="SoundTouch.Net" Version="2.3.2" />
-+    <PackageReference Include="FFmpeg.AutoGen" Version="7.1.1" />
-+  </ItemGroup>
-+</Project>
 diff --git a/library/SegmentedPcm.cs b/library/SegmentedPcm.cs
 new file mode 100644
-index 0000000..6d812d9
+index 0000000..bed19dd
 --- /dev/null
 +++ b/library/SegmentedPcm.cs
 @@ -0,0 +1,73 @@
 +/* SPDX-License-Identifier: LGPL-2.1-only */
 +
-+#if HBXL_IN_PROCESS
++#if OUNSU_IN_PROCESS
 +namespace native_audio_library
 +{
 +    /// <summary>
-+    /// HBLauncher (Switch 2): a decoded track as 16-bit PCM in 64 KiB segments.
++    /// Switch 2: a decoded track as 16-bit PCM in 64 KiB segments.
 +    /// The console's managed heap is small (768 MiB hard limit, 1 GiB region range), and whole songs live in it. One array per
 +    /// song (40-85 MB) lands on the large object heap, which needs contiguous space: after a few map changes the range was so
 +    /// fragmented that even a 4 MiB array couldn't be placed (OutOfMemoryException with ~270 MiB in use). Segments stay below
@@ -1804,3 +1767,40 @@ index 0000000..6d812d9
 +    }
 +}
 +#endif
+diff --git a/ounsu/mysoundlib-ounsu.csproj b/ounsu/mysoundlib-ounsu.csproj
+new file mode 100644
+index 0000000..c4c68f7
+--- /dev/null
++++ b/ounsu/mysoundlib-ounsu.csproj
+@@ -0,0 +1,31 @@
++<Project Sdk="Microsoft.NET.Sdk">
++  <!-- ounsu! (Switch 2) build of mysoundlib: bindings (mysoundlib_cs) and library (native_audio_library) in one
++       managed assembly, compiled into the app by NativeAOT instead of being loaded as libmysoundlib.so.
++       The bindings' DllImport("mysoundlib") calls resolve to the library's [UnmanagedCallersOnly(EntryPoint = "msl...")]
++       exports through DirectPInvoke + UnmanagedEntryPointsAssembly in the app project.
++       BASS decoding and ASIO output are left out (OUNSU_NO_BASS): FFmpeg decodes, SDL3 plays.
++       OUNSU_IN_PROCESS drops the bindings' [SuppressGCTransition]: the callee is managed code in the same runtime, and
++       entering it without the transition is a fail-fast ("attempted to call a UnmanagedCallersOnly method"). -->
++  <PropertyGroup>
++    <TargetFramework>net10.0</TargetFramework>
++    <AssemblyName>mysoundlib-ounsu</AssemblyName>
++    <RootNamespace>native_audio_library</RootNamespace>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <Nullable>enable</Nullable>
++    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
++    <IsAotCompatible>true</IsAotCompatible>
++    <DefineConstants>$(DefineConstants);OUNSU_NO_BASS;OUNSU_IN_PROCESS</DefineConstants>
++    <NoWarn>$(NoWarn);CS1591</NoWarn>
++  </PropertyGroup>
++  <ItemGroup>
++    <Compile Include="../bindings/*.cs" />
++    <Compile Include="../library/*.cs" Exclude="../library/BassDecoder.cs;../library/NAudioAsioManager.cs" />
++  </ItemGroup>
++  <ItemGroup>
++    <PackageReference Include="NAudio.Core" Version="2.2.1" />
++    <!-- Same version as osu.Framework's. -->
++    <PackageReference Include="ppy.SDL3-CS" Version="2026.1002.1" />
++    <PackageReference Include="SoundTouch.Net" Version="2.3.2" />
++    <PackageReference Include="FFmpeg.AutoGen" Version="7.1.1" />
++  </ItemGroup>
++</Project>

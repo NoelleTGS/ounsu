@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Generate shim/bass_stubs.S: BASS functions osu-framework references, stubbed to fail.
 
-BASS is closed source with no build for the console, so for now every call reports
-failure: x0 = 0 and d0 = 0.0 (covers integer, pointer, bool, float and double returns).
-osu-framework then logs "BASS failed to initialize" and runs without audio.
-The real audio backend will be osu-framework PR #6002 (SDL3 + mysoundlib).
+BASS is closed source with no build for the console, and the audio goes through osu-framework's SDL3 backend
+(PR #6002 + mysoundlib) instead. osu-framework still references BASS, so every BASS call reports failure:
+x0 = 0 and d0 = 0.0 (covers integer, pointer, bool, float and double returns).
 
-usage: gen-bass-stubs.py undefined.txt shim/bass_stubs.S
-  undefined.txt: one undefined BASS_* symbol per line, from a failed hbxl-build link.
+usage: gen-bass-stubs.py tools/bass-symbols.txt shim/bass_stubs.S
+  bass-symbols.txt: one BASS_* symbol per line (the island link's undefined BASS symbols, after a framework update).
 """
 import sys
 from pathlib import Path

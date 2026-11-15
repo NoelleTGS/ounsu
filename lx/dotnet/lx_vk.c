@@ -173,7 +173,7 @@ static void *device_fn(const char *name) {
 
 /* Swapchain recreation does not work on the console's window: a second swapchain on the same surface failed in
    gfx-probe whether the old one was destroyed after (acquire failed) or before (VK_ERROR_SURFACE_LOST_KHR). The host
-   sizes the window to 1920x1080 before anything is made, but osu-framework still recreates its swapchain once at
+   sizes the window before anything is made, but osu-framework still recreates its swapchain once at
    start. So a recreation with the same size and format hands back the old swapchain (HBLauncher did the same), and
    the destroy of the "old" one that follows is swallowed. Anything else goes through (and is logged).
    Veldrid acquires an image right after creating a swapchain, so at a reuse one image is still acquired and not

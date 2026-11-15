@@ -1,7 +1,7 @@
 /*
  * The island runtime (built with the musl toolchain, linked into the island ahead of libc.a).
  *
- * The toolchain's musl is patched (musl-hbx-syscall-hooks.diff, from the HBLauncher era) so that every syscall calls
+ * The toolchain's musl is patched (patches/musl-hbx-syscall-hooks.diff, from HBLauncher) so that every syscall calls
  * __hbx_syscall and the assembly that would issue `svc 0` itself (__clone, __syscall_cp_asm, __unmapself, vfork) is
  * weak. This file supplies all of them and forwards to the host through struct lx_host. It also builds the
  * argv/envp/auxv vector musl's __libc_start_main expects, with synthetic program headers for TLS and unwinding.

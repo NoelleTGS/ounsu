@@ -11,7 +11,7 @@ no dynamic loading, so this port compiles both halves straight into the osu! bin
 
 | File | Change |
 |---|---|
-| `hbxl/mysoundlib-hbxl.csproj` (new) | Builds the bindings and the library as one assembly referenced by osu-game. Defines `HBXL_NO_BASS` (no BASS/ASIO paths) and `HBXL_IN_PROCESS` (one .NET runtime instead of two). osu-game binds its `msl*` exports with DirectPInvoke |
+| `ounsu/mysoundlib-ounsu.csproj` (new) | Builds the bindings and the library as one assembly referenced by osu-game. Defines `OUNSU_NO_BASS` (no BASS/ASIO paths) and `OUNSU_IN_PROCESS` (one .NET runtime instead of two). osu-game binds its `msl*` exports with DirectPInvoke |
 | `bindings/MySoundLibrary.cs` | No `[SuppressGCTransition]` in-process: the callee is managed code and needs the GC transition (with it, the GC could deadlock) |
 | `library/NativeAudioLibrary.cs` | SDL3 comes from osu-framework's own binding (one binary) |
 | `library/SegmentedPcm.cs` (new), `library/Decoder.cs`, `library/TrackSDL3AudioPlayer.cs` | Decoded songs are stored as 16-bit PCM in 64 KiB segments. Upstream kept the whole decoded song in one array and re-allocated and copied the whole song whenever decoding ran past FFmpeg's duration estimate; on the console's small heap, those big arrays fragmented memory and crashed the game after a few songs |

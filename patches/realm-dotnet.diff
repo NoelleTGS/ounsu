@@ -1,14 +1,14 @@
 Submodule wrappers/realm-core contains modified content
 diff --git a/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.cpp b/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.cpp
-index 659a605..bbec0ba 100644
+index 659a605..a4e358d 100644
 --- a/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.cpp
 +++ b/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.cpp
 @@ -31,6 +31,25 @@ ExternalCommitHelper::ExternalCommitHelper(RealmCoordinator& parent, const Realm
      , m_sg(DB::create(realm::make_in_realm_history(), config.path,
                        DBOptions(parent.is_in_memory() ? DBOptions::Durability::MemOnly : DBOptions::Durability::Full,
                                  parent.get_encryption_key().data())))
-+#ifdef HBX_SWITCH2
-+    // osu-HBLauncher (Switch 2, hbxl): no epoll/FIFO, so this generic helper is used, and upstream's
++#ifdef OUNSU_ISLAND
++    // ounsu! (Switch 2): built without epoll (REALM_HAVE_EPOLL=OFF), so this generic helper is used, and upstream's
 +    // notify_others() is a no-op. RealmCoordinator::wake_up_notifier_worker() relies on it, so a
 +    // notifier registered while nothing is being written (osu!'s song select subscribing to beatmap
 +    // sets) never got its initial results. notify_others() now releases this listener's wait; the
@@ -39,7 +39,7 @@ index 659a605..bbec0ba 100644
  
  ExternalCommitHelper::~ExternalCommitHelper()
  {
-+#ifdef HBX_SWITCH2
++#ifdef OUNSU_ISLAND
 +    // A notify_others() racing with shutdown may re-arm the wait after a release: keep releasing
 +    // until the listener has seen m_closing and exited.
 +    m_closing = true;
@@ -52,7 +52,7 @@ index 659a605..bbec0ba 100644
 +#endif
  }
  
-+#ifdef HBX_SWITCH2
++#ifdef OUNSU_ISLAND
 +void ExternalCommitHelper::notify_others()
 +{
 +    m_sg->wait_for_change_release();
@@ -61,7 +61,7 @@ index 659a605..bbec0ba 100644
  void ExternalCommitHelper::notify_others() {}
 +#endif
 diff --git a/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.hpp b/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.hpp
-index a94e01e..531afc0 100644
+index a94e01e..8afeb8a 100644
 --- a/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.hpp
 +++ b/wrappers/realm-core/src/realm/object-store/impl/generic/external_commit_helper.hpp
 @@ -18,6 +18,7 @@
@@ -77,15 +77,15 @@ index a94e01e..531afc0 100644
      // The listener thread
      std::future<void> m_thread;
 +
-+#ifdef HBX_SWITCH2
-+    // osu-HBLauncher: set by the destructor; the listener exits only when this is set.
++#ifdef OUNSU_ISLAND
++    // ounsu!: set by the destructor; the listener exits only when this is set.
 +    std::atomic<bool> m_closing{false};
 +#endif
  };
  
  } // namespace _impl
 diff --git a/wrappers/realm-core/src/realm/util/file.cpp b/wrappers/realm-core/src/realm/util/file.cpp
-index 3dcde11..d4ae98a 100644
+index 3dcde11..197fb76 100644
 --- a/wrappers/realm-core/src/realm/util/file.cpp
 +++ b/wrappers/realm-core/src/realm/util/file.cpp
 @@ -1743,9 +1743,14 @@ void File::MapBase::unmap() noexcept
@@ -93,8 +93,8 @@ index 3dcde11..d4ae98a 100644
                                  util::WriteObserver* observer)
  {
 -#ifdef _WIN32
-+#if defined(_WIN32) || defined(HBX_SWITCH2)
-+    // HBX_SWITCH2 (osu-HBLauncher): hbxl can't place a file mapping inside a reserved range
++#if defined(_WIN32) || defined(OUNSU_ISLAND)
++    // OUNSU_ISLAND (ounsu!, Switch 2): the host can't place a file mapping inside a reserved range
 +    // (no MAP_FIXED), so take the Windows path: callers fall back to one plain mapping per section.
 +    static_cast<void>(file);
 +    static_cast<void>(a);

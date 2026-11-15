@@ -8,7 +8,7 @@
 SECTIONS
 {
     /* Read-only data goes where the final link puts .data.rel.ro: the writable segment. musl and every library built
-       for HBLauncher are position-dependent code, so their constant tables hold absolute pointers (lock pointers,
+       by tools/build-native.sh are position-dependent code, so their constant tables hold absolute pointers (lock pointers,
        stderr, codec and name tables); in the position-independent .nro those need load-time fixups, which libounce's
        link (-z text) forbids in read-only memory. Exception tables too (non-PIC C++ may put absolute type pointers
        there). The cost: the island's constants are not write-protected. */

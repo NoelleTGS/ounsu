@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""PC-side server for probes/net-probe (TESTING.md test 7).  Standard library + the openssl CLI only.
+"""PC-side server for probes/net-probe (TESTING.md test 5).  Standard library + the openssl CLI only.
 
   HTTP       :39510   /hello, /bytes/N (N pattern bytes), /raw/N (pattern bytes only, no headers, then close), /slow (5 s stall)
   HTTPS      :39511   same paths; certificate signed by a local test CA (probes/net-probe/certs/)
   WebSocket  :39512   /echo (binary/text frames echoed back)
 
-The test CA's certificate is copied to fsroot/net-probe/ca.pem, which the probe trusts explicitly.  Its key never
-leaves the PC.  Usage:  python3 tools/net-probe-server.py [--host 192.168.1.206]
+The test CA (probes/net-probe/certs/) goes into the probe's romfs, and the probe trusts it explicitly.  Its key never
+leaves the PC.  Usage:  python3 tools/net-probe-server.py --host <this PC's LAN address>
 """
 import argparse
 import base64
@@ -180,7 +180,7 @@ def ws_main(host, port):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--host", default="192.168.1.206")
+    ap.add_argument("--host", required=True, help="this PC's LAN address (goes into the certificate)")
     ap.add_argument("--bind", default="0.0.0.0")
     a = ap.parse_args()
     pem, key = make_certs(a.host)

@@ -15,7 +15,7 @@ library. Normally it's a shared library from NuGet; the console needs it static.
 | `src/libveldrid-spirv/libveldrid-spirv.cpp` | `#include <cstdint>` (GCC 15 no longer includes it transitively) |
 
 Linking the real `-lstdc++` it needs means dropping NativeAOT's `libstdc++compat.a` (`--exclude libstdc++compat.a` on
-`tools/aot-island.py` in `console/osu-game/build.sh`). Built with the musl toolchain into `build-hbx/`.
+`tools/aot-island.py` in `console/osu-game/build.sh`). `sh tools/build-native.sh veldrid-spirv` builds it with the musl toolchain into `build-lx/`.
 
 ## Restoring
 
@@ -23,4 +23,5 @@ Linking the real `-lstdc++` it needs means dropping NativeAOT's `libstdc++compat
 git -C src/native/veldrid-spirv checkout -f 039422c80c113623afd70146f2015e7824130bd6
 git -C src/native/veldrid-spirv submodule update --init --recursive
 git -C src/native/veldrid-spirv apply --whitespace=nowarn patches/veldrid-spirv.diff
+sh tools/build-native.sh veldrid-spirv
 ```

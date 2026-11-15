@@ -22,8 +22,6 @@
  * and the Nmouse wheel/buttons are ignored. So the stick never moves the cursor and scrolls at once. The "Switch 2"
  * settings choose which sides may be a mouse (none, left, right, both) and the speed.
  *
- * Ported from HBLauncher's hbxl_input.c, which read the same things through SmileBASIC's SDK at audited offsets.
- *
  * SDL's internal mouse/keyboard state doesn't see pushed events. osu-framework only reads the global mouse state
  * while the cursor is outside the window, so one WINDOW_MOUSE_ENTER (and FOCUS_GAINED) is pushed at the start.
  */
@@ -39,7 +37,7 @@
 #include "lx_abi.h"
 
 int lx_input_poll(struct lx_input *out, uint32_t flags); /* island runtime */
-extern void hbxl_log(const char *text);                   /* lx_osu.c */
+extern void ounsu_log(const char *text);                   /* lx_osu.c */
 
 void __real_SDL_PumpEvents(void);
 void __wrap_SDL_PumpEvents(void);
@@ -134,7 +132,7 @@ static void logf_(const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
-    hbxl_log(line);
+    ounsu_log(line);
 }
 
 static void push_window(SDL_WindowID window, SDL_EventType type) {
@@ -290,7 +288,7 @@ static const char *button_name(uint32_t bit) {
 }
 
 /* button: 0 none, 1 B, 2 L, 3 R, 4 ZL, 5 ZR, 6 L3, 7 R3. */
-void hbxl_input_set_gyro(int button, float speed_x, float speed_y, int invert_x, int invert_y) {
+void ounsu_input_set_gyro(int button, float speed_x, float speed_y, int invert_x, int invert_y) {
     static const uint32_t bits[] = { 0, BTN_B, BTN_L, BTN_R, BTN_ZL, BTN_ZR, BTN_STICK_L, BTN_STICK_R };
     if (button >= 0 && button < (int)(sizeof bits / sizeof bits[0])) gyro_button = bits[button];
     if (speed_x > 0.05f && speed_x < 20.0f) gyro_speed_x = speed_x;
@@ -381,7 +379,7 @@ static SDL_Scancode repeat_key;
 static uint64_t repeat_at;
 
 /* "Switch 2" settings: USB keyboard/mouse on or off, and the mouse speed. LX_NO_KBMOUSE=1 keeps them off. */
-void hbxl_input_set_kbmouse(int enabled, float speed) {
+void ounsu_input_set_kbmouse(int enabled, float speed) {
     const char *e = getenv("LX_NO_KBMOUSE");
     kbmouse_on = enabled != 0 && !(e && *e == '1');
     if (speed > 0.05f && speed < 20.0f) mouse_speed = speed;
@@ -390,7 +388,7 @@ void hbxl_input_set_kbmouse(int enabled, float speed) {
 }
 
 /* "Switch 2" settings: which Joy-Cons may be a mouse (sides: bit 0 left, bit 1 right) and the mouse speed. */
-void hbxl_input_set_joymouse(int sides, float speed) {
+void ounsu_input_set_joymouse(int sides, float speed) {
     static const char *names[] = { "off", "left Joy-Con only", "right Joy-Con only", "both Joy-Cons" };
     joymouse_sides = (uint32_t)sides & 3u;
     if (speed > 0.05f && speed < 20.0f) joymouse_speed = speed;
@@ -476,7 +474,7 @@ static void keyboard(SDL_Window *win, SDL_WindowID window, uint64_t now) {
         if (down == was) continue;
         if (down && !keyboard_seen) {
             keyboard_seen = true;
-            hbxl_log("lx-input: USB keyboard in use");
+            ounsu_log("lx-input: USB keyboard in use");
         }
         push_key(window, (SDL_Scancode)sc, mod, down, false);
         if (down) {
@@ -518,7 +516,7 @@ static void mice(SDL_WindowID window, int width, int height, uint64_t now) {
     if (kbmouse_on && input.mouse_connected) {
         if (!mouse_seen) {
             mouse_seen = true;
-            hbxl_log("lx-input: USB mouse connected");
+            ounsu_log("lx-input: USB mouse connected");
         }
         /* hid works in 1280x720 screen space. */
         move_cursor(window, width, height, (float)input.mouse_dx * mouse_speed * (float)width / HID_W,
@@ -595,13 +593,13 @@ void __wrap_SDL_PumpEvents(void) {
     if ((flags & LX_INPUT_GYRO) && !gyro_held() && !input.gyro_sensors) flags &= ~LX_INPUT_GYRO;
     if (!lx_input_poll(&input, flags)) {
         host_input = false;
-        hbxl_log("lx-input: the host has no input entry (ABI < 4): no input");
+        ounsu_log("lx-input: the host has no input entry (ABI < 4): no input");
         return;
     }
     static bool announced;
     if (!announced) {
         announced = true;
-        hbxl_log("lx-input: touch screen + controllers (stick = cursor, A = click, Plus = back), USB keyboard/mouse "
+        ounsu_log("lx-input: touch screen + controllers (stick = cursor, A = click, Plus = back), USB keyboard/mouse "
                  "and Joy-Con 2 mouse active");
     }
 

@@ -24,7 +24,8 @@ SOFTWARE.
 
 Parts of lx/host (the Linux syscall layer: syscalls, memory, threads, files,
 networking) are ported from HBLauncher's Linux runtime
-(https://github.com/ravensclawx/HBLauncher), under this licence:
+(https://github.com/ravensclawx/HBLauncher), and
+patches/musl-hbx-syscall-hooks.diff is HBLauncher's, under this licence:
 
 Copyright (c) 2026 RavensClawX and contributors
 

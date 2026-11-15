@@ -9,8 +9,8 @@
  * OutOfMemoryException rather than a silent crash.
  *
  * pthread_kill: NativeAOT suspends threads for a GC with an activation signal. There are no signals here, so the
- * signal is reported as sent and the GC waits for each thread to reach a safepoint by itself (as on HBLauncher before
- * it emulated activations; the same emulation through libnx is a later step).
+ * signal is reported as sent and the GC waits for each thread to reach a safepoint by itself (osu-framework's
+ * ThrottledFrameClock patch makes sure busy game threads pass one).
  *
  * mlock: the FlushProcessWriteBuffers fallback at start-up uses it; memory is always resident here.
  */

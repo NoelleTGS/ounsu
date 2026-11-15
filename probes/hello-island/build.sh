@@ -3,7 +3,7 @@
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
-TC=${LX_MUSL_TOOLCHAIN:-$HOME/osu-HBLauncher/toolchain-src/toolchain}
+TC=${LX_MUSL_TOOLCHAIN:-$ROOT/toolchain}
 OUT="$HERE/build"
 mkdir -p "$OUT"
 

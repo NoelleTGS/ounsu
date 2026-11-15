@@ -24,4 +24,5 @@ has no dynamic loading, so OpenSSL is built as static `libssl.a` + `libcrypto.a`
 ```sh
 git -C src/native/openssl checkout -f 45e844fa2a14ec92d146bd8f5778ac130b6625fb
 git -C src/native/openssl apply --whitespace=nowarn patches/openssl.diff
+sh tools/build-native.sh openssl   # libssl.a and libcrypto.a, in the checkout
 ```

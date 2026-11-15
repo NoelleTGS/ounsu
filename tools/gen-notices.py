@@ -9,7 +9,7 @@ licence file get it verbatim. A package with no licence information and no entry
 the package's repository and add it to KNOWN.
 
 usage: gen-notices.py <out.txt>
-env:   MUSL_SRC  musl source folder with COPYRIGHT (default ~/osu-HBLauncher/toolchain-src/musl-1.2.6)"""
+env:   MUSL_SRC  musl source folder with COPYRIGHT (default: musl-1.2.6 next to the toolchain, patches/musl.md)"""
 import json
 import os
 import re
@@ -18,7 +18,9 @@ from collections import defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DKP = os.environ.get("DEVKITPRO", "/opt/devkitpro")
-MUSL_SRC = os.environ.get("MUSL_SRC", os.path.expanduser("~/osu-HBLauncher/toolchain-src/musl-1.2.6"))
+TOOLCHAIN = os.environ.get("LX_MUSL_TOOLCHAIN", os.path.join(ROOT, "toolchain"))
+# musl-cross-make keeps the musl sources next to its output folder (toolchain-src/musl-1.2.6, toolchain-src/toolchain).
+MUSL_SRC = os.environ.get("MUSL_SRC", os.path.join(os.path.dirname(os.path.realpath(TOOLCHAIN)), "musl-1.2.6"))
 REPO_URL = "https://github.com/NoelleTGS/ounsu"
 
 # Packages whose .nuspec has no usable licence information, checked against their repositories.
@@ -147,7 +149,7 @@ component("osu! resources (switch/ounsu/osu-resources/ in the release zip), by p
 # ---------------------------------------------------------------------------------------------------- native
 section("2. Native libraries linked into ounsu.nro")
 component("SDL 3, by Sam Lantinga and contributors", "zlib", [src("native", "SDL", "LICENSE.txt")],
-          "https://libsdl.org. The hbx audio/joystick drivers come from the Twilight Princess HBLauncher port (CC0).")
+          "https://libsdl.org")
 component("FFmpeg 7.1.1 (audio decoders only)", "LGPL-2.1-or-later",
           [src("native", "ffmpeg", "LICENSE.md"), src("native", "ffmpeg", "COPYING.LGPLv2.1")],
           "https://ffmpeg.org. Built without --enable-gpl and --enable-nonfree (tools/build-ffmpeg.sh).")

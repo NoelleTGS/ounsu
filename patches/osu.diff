@@ -1,44 +1,12 @@
-diff --git a/osu.Game/Beatmaps/WorkingBeatmapCache.cs b/osu.Game/Beatmaps/WorkingBeatmapCache.cs
-index 75f1bd2a07..4590d82713 100644
---- a/osu.Game/Beatmaps/WorkingBeatmapCache.cs
-+++ b/osu.Game/Beatmaps/WorkingBeatmapCache.cs
-@@ -222,6 +222,12 @@ private Texture getBackgroundFromStore(TextureStore store)
-                 }
-             }
- 
-+#if HBXL
-+            // Real audio (SDL3 backend, osu-framework PR #6002) since 2026-11-09; OSU_HBXL_NO_AUDIO=1 in hbxl-env brings back
-+            // the silent virtual track.
-+            private static readonly bool hbxl_no_audio = System.Environment.GetEnvironmentVariable("OSU_HBXL_NO_AUDIO") == "1";
-+#endif
-+
-             protected override Track GetBeatmapTrack()
-             {
-                 if (string.IsNullOrEmpty(Metadata?.AudioFile))
-@@ -230,6 +236,14 @@ protected override Track GetBeatmapTrack()
-                 if (Metadata.AudioFile == virtual_track_filename)
-                     return null;
- 
-+#if HBXL
-+                // Switch 2 port: BASS is stubbed (no audio yet), so a real track never loads or plays and the
-+                // gameplay clock, which follows the track, stuttered and froze. A virtual track (length from the
-+                // hit objects, driven by a stopwatch) plays maps silently but smoothly. Now opt-in (see above).
-+                if (hbxl_no_audio)
-+                    return null;
-+#endif
-+
-                 try
-                 {
-                     string fileStorePath = BeatmapSetInfo.GetPathForFile(Metadata.AudioFile);
 diff --git a/osu.Game/Configuration/SettingSourceAttribute.cs b/osu.Game/Configuration/SettingSourceAttribute.cs
-index ca544aa332..0c125a8f79 100644
+index ca544aa332..4f3151c323 100644
 --- a/osu.Game/Configuration/SettingSourceAttribute.cs
 +++ b/osu.Game/Configuration/SettingSourceAttribute.cs
 @@ -8,6 +8,9 @@
  using System.Reflection;
  using JetBrains.Annotations;
  using osu.Framework.Bindables;
-+#if HBXL
++#if OUNSU
 +using osu.Framework.Extensions;
 +#endif
  using osu.Framework.Extensions.ObjectExtensions;
@@ -48,13 +16,13 @@ index ca544aa332..0c125a8f79 100644
                          break;
  
                      case IBindable bindable:
-+#if HBXL
++#if OUNSU
 +                        // Switch 2 port (NativeAOT): MakeGenericType(ModSettingsEnumDropdown<TEnum>) needs code that was never
 +                        // compiled ("missing native code or metadata", crashed the mod select overlay). Use a non-generic
 +                        // dropdown over boxed enum values instead.
 +                        if (bindable is INotifyValueChangedUntyped untyped && bindable is IParseable parseable && untyped.ValueUntyped is Enum)
 +                        {
-+                            yield return new HbxlEnumSettingsDropdown(untyped, parseable)
++                            yield return new OunsuEnumSettingsDropdown(untyped, parseable)
 +                            {
 +                                LabelText = attr.Label,
 +                                TooltipText = attr.Description,
@@ -70,14 +38,14 @@ index ca544aa332..0c125a8f79 100644
                    .OrderBy(attr => attr.Item1)
                    .ToArray();
  
-+#if HBXL
++#if OUNSU
 +        /// <summary>A boxed enum value, shown by its description.</summary>
-+        private sealed class HbxlEnumItem
++        private sealed class OunsuEnumItem
 +        {
 +            public readonly object Value;
 +            private readonly string label;
 +
-+            public HbxlEnumItem(object value)
++            public OunsuEnumItem(object value)
 +            {
 +                Value = value;
 +                label = value.GetLocalisableDescription().ToString();
@@ -90,20 +58,20 @@ index ca544aa332..0c125a8f79 100644
 +        /// Non-generic equivalent of <see cref="ModSettingsEnumDropdown{T}"/> for the Switch 2 port: reads the setting through
 +        /// <see cref="INotifyValueChangedUntyped"/>, writes it through <see cref="IParseable.Parse"/>, no generic instantiation at runtime.
 +        /// </summary>
-+        private partial class HbxlEnumSettingsDropdown : SettingsDropdown<HbxlEnumItem>
++        private partial class OunsuEnumSettingsDropdown : SettingsDropdown<OunsuEnumItem>
 +        {
-+            public HbxlEnumSettingsDropdown(INotifyValueChangedUntyped source, IParseable target)
++            public OunsuEnumSettingsDropdown(INotifyValueChangedUntyped source, IParseable target)
 +            {
 +                Type enumType = source.ValueUntyped.GetType();
 +                var items = Enum.GetValuesAsUnderlyingType(enumType)
 +                                .Cast<object>()
-+                                .Select(raw => new HbxlEnumItem(Enum.ToObject(enumType, raw)))
++                                .Select(raw => new OunsuEnumItem(Enum.ToObject(enumType, raw)))
 +                                .ToArray();
 +
-+                HbxlEnumItem find(object value) => items.FirstOrDefault(i => EqualityComparer<object>.Default.Equals(i.Value, value)) ?? items[0];
++                OunsuEnumItem find(object value) => items.FirstOrDefault(i => EqualityComparer<object>.Default.Equals(i.Value, value)) ?? items[0];
 +
 +                Items = items;
-+                Current = new Bindable<HbxlEnumItem>(find(source.DefaultUntyped)) { Value = find(source.ValueUntyped) };
++                Current = new Bindable<OunsuEnumItem>(find(source.DefaultUntyped)) { Value = find(source.ValueUntyped) };
 +
 +                Current.BindValueChanged(e =>
 +                {
@@ -130,16 +98,16 @@ index ca544aa332..0c125a8f79 100644
              where T : struct, Enum
          {
 diff --git a/osu.Game/Database/ImportTask.cs b/osu.Game/Database/ImportTask.cs
-index 8f2752020b..e22f1e03ba 100644
+index 8f2752020b..34ccaad2cf 100644
 --- a/osu.Game/Database/ImportTask.cs
 +++ b/osu.Game/Database/ImportTask.cs
 @@ -49,7 +49,13 @@ public ArchiveReader GetReader()
              if (Stream == null)
              {
                  if (ZipUtils.IsZipArchive(Path))
-+#if HBXL
-+                    // Switch 2 port: every read() is a round trip to the PC's file server. FileStream's default 4 KiB buffer made
-+                    // opening a downloaded .osz take up to a minute before "Beginning import" (2026-11-09); 1 MiB reads it in a few.
++#if OUNSU
++                    // Switch 2 port: every read() is a syscall the host answers from the SD card. FileStream's default 4 KiB buffer
++                    // made opening a large .osz slow; 1 MiB reads it in a few.
 +                    return new ZipArchiveReader(new FileStream(Path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20), System.IO.Path.GetFileName(Path));
 +#else
                      return new ZipArchiveReader(File.Open(Path, FileMode.Open, FileAccess.Read, FileShare.Read), System.IO.Path.GetFileName(Path));
@@ -148,7 +116,7 @@ index 8f2752020b..e22f1e03ba 100644
                      return new DirectoryArchiveReader(Path);
                  if (File.Exists(Path))
 diff --git a/osu.Game/Database/ModelDownloader.cs b/osu.Game/Database/ModelDownloader.cs
-index 9eef01a7d9..83ce8511b0 100644
+index 9eef01a7d9..45914b725b 100644
 --- a/osu.Game/Database/ModelDownloader.cs
 +++ b/osu.Game/Database/ModelDownloader.cs
 @@ -5,6 +5,7 @@
@@ -163,24 +131,24 @@ index 9eef01a7d9..83ce8511b0 100644
          /// <returns>The request object.</returns>
          protected abstract ArchiveDownloadRequest<T> CreateDownloadRequest(T model, bool minimiseDownloadSize);
  
-+#if HBXL
++#if OUNSU
 +        // Switch 2 port: at most two downloads (download + import) at a time. Many parallel downloads each held a
 +        // dedicated thread and queued archive reads over the slow file-server link; the console froze in back-to-back
 +        // full GCs after ~7 overlapping downloads (2026-11-09). Queued downloads start when a slot frees. Also keeps bulk
 +        // downloading gentle on ppy's servers.
-+        private static readonly SemaphoreSlim hbxl_download_slots = new SemaphoreSlim(2);
++        private static readonly SemaphoreSlim ounsu_download_slots = new SemaphoreSlim(2);
 +#endif
 +
          protected bool Download(T model, bool minimiseDownloadSize, TModel? originalModel)
          {
              if (!canDownload(model)) return false;
-+#if HBXL
-+            int hbxlSlot = 0; // 0 queued, 1 holding a slot, 2 finished (success, failure or cancel)
++#if OUNSU
++            int ounsuSlot = 0; // 0 queued, 1 holding a slot, 2 finished (success, failure or cancel)
 +
 +            void releaseSlot()
 +            {
-+                if (Interlocked.Exchange(ref hbxlSlot, 2) == 1)
-+                    hbxl_download_slots.Release();
++                if (Interlocked.Exchange(ref ounsuSlot, 2) == 1)
++                    ounsu_download_slots.Release();
 +            }
 +#endif
  
@@ -190,7 +158,7 @@ index 9eef01a7d9..83ce8511b0 100644
                              DownloadFailed?.Invoke(request);
  
                          CurrentDownloads.Remove(request);
-+#if HBXL
++#if OUNSU
 +                        releaseSlot();
 +#endif
                      }
@@ -198,7 +166,7 @@ index 9eef01a7d9..83ce8511b0 100644
              };
  
              request.Failure += triggerFailure;
-+#if HBXL
++#if OUNSU
 +            request.Failure += _ => releaseSlot();
 +#endif
  
@@ -208,18 +176,18 @@ index 9eef01a7d9..83ce8511b0 100644
              CurrentDownloads.Add(request);
              PostNotification?.Invoke(notification);
  
-+#if HBXL
++#if OUNSU
 +            if (api != null)
 +            {
 +                // Attached now so a cancel while queued can schedule its failure callbacks (they need the API).
 +                request.AttachAPI(api);
 +                Task.Run(async () =>
 +                {
-+                    await hbxl_download_slots.WaitAsync().ConfigureAwait(false);
++                    await ounsu_download_slots.WaitAsync().ConfigureAwait(false);
 +
-+                    if (Interlocked.CompareExchange(ref hbxlSlot, 1, 0) != 0)
++                    if (Interlocked.CompareExchange(ref ounsuSlot, 1, 0) != 0)
 +                    {
-+                        hbxl_download_slots.Release(); // cancelled while queued
++                        ounsu_download_slots.Release(); // cancelled while queued
 +                        return;
 +                    }
 +
@@ -233,14 +201,14 @@ index 9eef01a7d9..83ce8511b0 100644
              DownloadBegan?.Invoke(request);
              return true;
 diff --git a/osu.Game/Database/RealmObjectExtensions.cs b/osu.Game/Database/RealmObjectExtensions.cs
-index 5d4c1ff378..0bf3f0bb10 100644
+index 5d4c1ff378..940ff532a4 100644
 --- a/osu.Game/Database/RealmObjectExtensions.cs
 +++ b/osu.Game/Database/RealmObjectExtensions.cs
 @@ -6,8 +6,10 @@
  using System.Diagnostics;
  using System.Linq;
  using System.Runtime.Serialization;
-+#if !HBXL_DETACH
++#if !OUNSU_DETACH
  using AutoMapper;
  using AutoMapper.Internal;
 +#endif
@@ -251,7 +219,7 @@ index 5d4c1ff378..0bf3f0bb10 100644
  {
      public static class RealmObjectExtensions
      {
-+#if !HBXL_DETACH // Switch 2 port: AutoMapper doesn't work under NativeAOT, see HbxlRealmCopier.
++#if !OUNSU_DETACH // Switch 2 port: AutoMapper doesn't work under NativeAOT, see OunsuRealmCopier.
          private static readonly IMapper write_mapper = new MapperConfiguration(c =>
          {
              c.ShouldMapField = _ => false;
@@ -267,8 +235,8 @@ index 5d4c1ff378..0bf3f0bb10 100644
              if (!item.IsManaged)
                  return item;
  
-+#if HBXL_DETACH
-+            return HbxlRealmCopier.Detach(item, beatmapSetMapper: item is BeatmapSetInfo);
++#if OUNSU_DETACH
++            return OunsuRealmCopier.Detach(item, beatmapSetMapper: item is BeatmapSetInfo);
 +#else
              if (item is BeatmapSetInfo)
                  return beatmap_set_mapper.Map<T>(item);
@@ -282,8 +250,8 @@ index 5d4c1ff378..0bf3f0bb10 100644
              => copyChangesToRealm(source, destination);
  
          private static void copyChangesToRealm<T>(T source, T destination) where T : RealmObjectBase
-+#if HBXL_DETACH
-+            => HbxlRealmCopier.CopyChangesToRealm(source, destination);
++#if OUNSU_DETACH
++            => OunsuRealmCopier.CopyChangesToRealm(source, destination);
 +#else
              => write_mapper.Map(source, destination);
 +#endif
@@ -291,14 +259,14 @@ index 5d4c1ff378..0bf3f0bb10 100644
          public static List<Live<T>> ToLiveUnmanaged<T>(this IEnumerable<T> realmList)
              where T : RealmObject, IHasGuidPrimaryKey
 diff --git a/osu.Game/Graphics/UserInterface/RollingCounter.cs b/osu.Game/Graphics/UserInterface/RollingCounter.cs
-index ac276450d5..06d78153c3 100644
+index ac276450d5..a3472491e7 100644
 --- a/osu.Game/Graphics/UserInterface/RollingCounter.cs
 +++ b/osu.Game/Graphics/UserInterface/RollingCounter.cs
 @@ -160,9 +160,38 @@ protected virtual void TransformCount(T currentValue, T newValue)
                      ? GetProportionalDuration(currentValue, newValue)
                      : RollingDuration;
  
-+#if HBXL
++#if OUNSU
 +            // Switch 2 port (NativeAOT): the string-based TransformTo looks DisplayedCount up by reflection, which
 +            // has no metadata on generic instantiations over value types (RollingCounter<double>, <int>, <long>):
 +            // "Cannot create TransformCustom for non-existent property or field" crashed the mod select overlay.
@@ -308,7 +276,7 @@ index ac276450d5..06d78153c3 100644
 +#endif
          }
  
-+#if HBXL
++#if OUNSU
 +        /// <summary>
 +        /// Reflection-free equivalent of the TransformCustom that <c>TransformTo(nameof(DisplayedCount), ...)</c> creates.
 +        /// </summary>
@@ -334,20 +302,20 @@ index ac276450d5..06d78153c3 100644
          /// Creates the text. Delegates to <see cref="CreateSpriteText"/> by default.
          /// </summary>
 diff --git a/osu.Game/Online/API/APIAccess.cs b/osu.Game/Online/API/APIAccess.cs
-index c099474341..f7b36cfba2 100644
+index c099474341..127597d0e9 100644
 --- a/osu.Game/Online/API/APIAccess.cs
 +++ b/osu.Game/Online/API/APIAccess.cs
 @@ -492,8 +492,19 @@ public void AuthenticateSecondFactor(string code)
              SecondFactorCode = code;
          }
  
-+#if HBXL_HUBS
++#if OUNSU_HUBS
 +        // Switch 2 port (NativeAOT): only the metadata hub (online users, presence, beatmap updates, daily challenge) is
-+        // connected. It goes through HbxlMessagePackHubProtocol, which lists that hub's types. The spectator and
++        // connected. It goes through OunsuMessagePackHubProtocol, which lists that hub's types. The spectator and
 +        // multiplayer hubs refuse self-built clients on ppy's side anyway, so they are never contacted: callers treat
-+        // null like DummyAPIAccess does. OSU_HBXL_HUBS=0 turns the metadata hub off as well.
++        // null like DummyAPIAccess does. OUNSU_HUBS=0 turns the metadata hub off as well.
 +        public IHubClientConnector GetHubConnector(string clientName, string endpoint) =>
-+            clientName == nameof(Metadata.OnlineMetadataClient) && Environment.GetEnvironmentVariable("OSU_HBXL_HUBS") != "0"
++            clientName == nameof(Metadata.OnlineMetadataClient) && Environment.GetEnvironmentVariable("OUNSU_HUBS") != "0"
 +                ? new HubClientConnector(clientName, endpoint, this, versionHash)
 +                : null;
 +#else
@@ -358,17 +326,17 @@ index c099474341..f7b36cfba2 100644
          public IChatClient GetChatClient() => new WebSocketChatClient(this);
  
 diff --git a/osu.Game/Online/HubClientConnector.cs b/osu.Game/Online/HubClientConnector.cs
-index c12043c727..2af670e40d 100644
+index c12043c727..2167849605 100644
 --- a/osu.Game/Online/HubClientConnector.cs
 +++ b/osu.Game/Online/HubClientConnector.cs
 @@ -64,10 +64,16 @@ protected override Task<PersistentEndpointClient> BuildConnectionAsync(Cancellat
                      options.Headers.Add(CLIENT_SESSION_ID_HEADER, API.SessionIdentifier.ToString());
                  });
  
-+#if HBXL_HUBS
++#if OUNSU_HUBS
 +            // Switch 2 port (NativeAOT): the stock MessagePack protocol needs runtime code generation for every argument.
-+            // Same wire format, ahead-of-time code only (see HbxlMessagePackHubProtocol).
-+            builder.Services.AddSingleton<Microsoft.AspNetCore.SignalR.Protocol.IHubProtocol>(new HbxlMessagePackHubProtocol());
++            // Same wire format, ahead-of-time code only (see OunsuMessagePackHubProtocol).
++            builder.Services.AddSingleton<Microsoft.AspNetCore.SignalR.Protocol.IHubProtocol>(new OunsuMessagePackHubProtocol());
 +#else
              builder.AddMessagePackProtocol(options =>
              {
@@ -383,20 +351,20 @@ index c12043c727..2af670e40d 100644
  
          protected override string ClientName { get; }
 +
-+#if HBXL_HUBS
++#if OUNSU_HUBS
 +        protected override bool LimitShortLivedConnections => true;
 +#endif
      }
  }
 diff --git a/osu.Game/Online/Metadata/OnlineMetadataClient.cs b/osu.Game/Online/Metadata/OnlineMetadataClient.cs
-index 6e4f7e4d6d..4019e43c7e 100644
+index 6e4f7e4d6d..015b7a29b1 100644
 --- a/osu.Game/Online/Metadata/OnlineMetadataClient.cs
 +++ b/osu.Game/Online/Metadata/OnlineMetadataClient.cs
 @@ -102,10 +102,101 @@ protected override void LoadComplete()
  
          private bool catchingUp;
  
-+#if HBXL_HUBS
++#if OUNSU_HUBS
 +        // Switch 2 port. ppy's server accepts a self-built client on this hub and pushes updates to it (beatmap updates,
 +        // the daily challenge), but answers every call the client makes with "Realtime online functionality is not
 +        // supported on this version of the game" (seen 2026-11-10: GetChangesSince, UpdateActivity and UpdateStatus, all
@@ -487,7 +455,7 @@ index 6e4f7e4d6d..4019e43c7e 100644
          {
              if (!connected.NewValue)
              {
-+#if HBXL_HUBS
++#if OUNSU_HUBS
 +                lock (gateLock)
 +                    callGate = null;
 +#endif
@@ -567,7 +535,7 @@ index 6e4f7e4d6d..4019e43c7e 100644
  
          protected override void Dispose(bool isDisposing)
 diff --git a/osu.Game/Online/Notifications/WebSocket/WebSocketNotificationsClientConnector.cs b/osu.Game/Online/Notifications/WebSocket/WebSocketNotificationsClientConnector.cs
-index 00f0f873b8..b60cab4c76 100644
+index 00f0f873b8..10ccb462a0 100644
 --- a/osu.Game/Online/Notifications/WebSocket/WebSocketNotificationsClientConnector.cs
 +++ b/osu.Game/Online/Notifications/WebSocket/WebSocketNotificationsClientConnector.cs
 @@ -32,8 +32,18 @@ protected override async Task<PersistentEndpointClient> BuildConnectionAsync(Can
@@ -579,10 +547,10 @@ index 00f0f873b8..b60cab4c76 100644
              await api.PerformAsync(req).ConfigureAwait(false);
 -            string endpoint = req.Response!.Endpoint;
 +
-+            // HBXL: PerformAsync doesn't throw when the request fails (no network): Response is null then. Upstream
-+            // dereferences it and relies on the NullReferenceException being caught by the caller. On hbxl a null
-+            // dereference is a hardware fault with no signal to turn it into an exception: it killed SmileBASIC
-+            // seconds after every network loss (2026-11-10). Throw a real exception instead.
++            // OUNSU: PerformAsync doesn't throw when the request fails (no network): Response is null then. Upstream
++            // dereferences it and relies on the NullReferenceException being caught by the caller. On the console a null
++            // dereference is a hardware fault that never becomes an exception: it killed the game seconds after every
++            // network loss (2026-11-10). Throw a real exception instead.
 +            if (req.Response == null)
 +                throw failure ?? new InvalidOperationException("The notifications endpoint request returned nothing.");
 +
@@ -591,14 +559,14 @@ index 00f0f873b8..b60cab4c76 100644
              ClientWebSocket socket = new ClientWebSocket();
              socket.Options.SetRequestHeader(@"Authorization", @$"Bearer {api.AccessToken}");
 diff --git a/osu.Game/Online/PersistentEndpointClientConnector.cs b/osu.Game/Online/PersistentEndpointClientConnector.cs
-index 7064906be4..82590c16a0 100644
+index 7064906be4..5d4b3ea0a7 100644
 --- a/osu.Game/Online/PersistentEndpointClientConnector.cs
 +++ b/osu.Game/Online/PersistentEndpointClientConnector.cs
 @@ -38,6 +38,23 @@ public abstract class PersistentEndpointClientConnector : IDisposable
          /// </summary>
          private int retryDelay = 3000;
  
-+#if HBXL_HUBS
++#if OUNSU_HUBS
 +        // Switch 2 port: upstream resets the retry delay on every connect, so a connection that is accepted and then dies
 +        // straight away (a protocol problem on our side, a server that doesn't want this client) would be re-made every
 +        // ~3 seconds for as long as the game runs. Connections that end within a minute count as
@@ -622,7 +590,7 @@ index 7064906be4..82590c16a0 100644
          private async Task connect()
          {
              cancelExistingConnect();
-+#if HBXL_HUBS
++#if OUNSU_HUBS
 +            Interlocked.Increment(ref connectGeneration);
 +#endif
              // reset retry delay to default.
@@ -632,7 +600,7 @@ index 7064906be4..82590c16a0 100644
                          await CurrentConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
  
                          Logger.Log($"{ClientName} connected!", LoggingTarget.Network);
-+#if HBXL_HUBS
++#if OUNSU_HUBS
 +                        connectedAt = Environment.TickCount64;
 +#endif
                          isConnected.Value = true;
@@ -642,7 +610,7 @@ index 7064906be4..82590c16a0 100644
              else
                  Logger.Log($"{ClientName} disconnected", LoggingTarget.Network);
  
-+#if HBXL_HUBS
++#if OUNSU_HUBS
 +            if (!hasBeenCancelled && LimitShortLivedConnections)
 +            {
 +                long connectedFor = Environment.TickCount64 - connectedAt;
@@ -677,16 +645,16 @@ index 7064906be4..82590c16a0 100644
              if (!hasBeenCancelled)
                  await Task.Run(connect, CancellationToken.None).ConfigureAwait(false);
 diff --git a/osu.Game/OsuGameBase.cs b/osu.Game/OsuGameBase.cs
-index 25fa587d34..d4cf5b8e5f 100644
+index 25fa587d34..c73e63f965 100644
 --- a/osu.Game/OsuGameBase.cs
 +++ b/osu.Game/OsuGameBase.cs
 @@ -278,7 +278,12 @@ private void load(ReadableKeyCombinationProvider keyCombinationProvider, Framewo
                  VersionHash = $"{Version}-{RuntimeInfo.OS}".ComputeMD5Hash();
              }
  
-+#if HBXL
-+            // Switch 2 port: the embedded assets are loose files on the file server (see HbxlFileResourceStore).
-+            Resources.AddStore(new HbxlFileResourceStore(Environment.GetEnvironmentVariable("OSU_RESOURCES_DIR") ?? "/osu-resources", OsuResources.ResourceAssembly));
++#if OUNSU
++            // Switch 2 port: the embedded assets are loose files on the SD card (see OunsuFileResourceStore).
++            Resources.AddStore(new OunsuFileResourceStore(Environment.GetEnvironmentVariable("OSU_RESOURCES_DIR") ?? "/osu-resources", OsuResources.ResourceAssembly));
 +#else
              Resources.AddStore(new DllResourceStore(OsuResources.ResourceAssembly));
 +#endif
@@ -694,14 +662,14 @@ index 25fa587d34..d4cf5b8e5f 100644
              dependencies.Cache(realm = new RealmAccess(Storage, CLIENT_DATABASE_FILENAME, Host.UpdateThread));
  
 diff --git a/osu.Game/Overlays/SettingsOverlay.cs b/osu.Game/Overlays/SettingsOverlay.cs
-index a82db88021..b0f400e4e1 100644
+index a82db88021..e7fa56b5a9 100644
 --- a/osu.Game/Overlays/SettingsOverlay.cs
 +++ b/osu.Game/Overlays/SettingsOverlay.cs
 @@ -34,6 +34,14 @@ public partial class SettingsOverlay : SettingsPanel, INamedOverlayComponent
  
          protected override Drawable CreateHeader() => new SettingsHeader(Title, Description);
  
-+#if HBXL_SETTINGS
++#if OUNSU_SETTINGS
 +        /// <summary>
 +        /// Switch 2 port: creates sections that live outside osu.Game (console/osu-game's "Switch 2" section). Set before the
 +        /// game loads; the sections go after the online section.
@@ -716,7 +684,7 @@ index a82db88021..b0f400e4e1 100644
                  new DebugSection()
              });
  
-+#if HBXL_SETTINGS
++#if OUNSU_SETTINGS
 +            if (CreateExtraSections != null)
 +                sections.InsertRange(sections.FindIndex(s => s is MaintenanceSection), CreateExtraSections());
 +#endif
@@ -725,14 +693,14 @@ index a82db88021..b0f400e4e1 100644
              if (today.Month == 4 && today.Day == 1)
                  sections.Insert(9, new AfToggleSection());
 diff --git a/osu.Game/Rulesets/UI/FrameStabilityContainer.cs b/osu.Game/Rulesets/UI/FrameStabilityContainer.cs
-index 990c1c839b..386d1f5023 100644
+index 990c1c839b..fb98fa5c3f 100644
 --- a/osu.Game/Rulesets/UI/FrameStabilityContainer.cs
 +++ b/osu.Game/Rulesets/UI/FrameStabilityContainer.cs
 @@ -159,6 +159,12 @@ private void updateClock()
  
              // TODO: replace IsDebugBuild with a framework flag which asserts we are in a test scene, interactively or otherwise.
              bool allowReferenceClockSeeks = hasReplayAttached || DebugUtils.IsNUnitRunning || DebugUtils.IsDebugBuild || !FrameStablePlayback;
-+#if HBXL
++#if OUNSU
 +            // No BASS on the console: the reference clock is a stopwatch-driven virtual track that keeps running through
 +            // GC pauses. With the >500 ms guard below, one long pause froze gameplay for good (the frame-stable time stops
 +            // advancing, so the gap only grows). Catch up instead, as debug builds do.
@@ -742,14 +710,14 @@ index 990c1c839b..386d1f5023 100644
              // This is a hotfix for ongoing bass issues we are trying to resolve (see https://www.un4seen.com/forum/?topic=20482.msg145474#msg145474)
              //
 diff --git a/osu.Game/Screens/Play/SubmittingPlayer.cs b/osu.Game/Screens/Play/SubmittingPlayer.cs
-index 3d201b26d3..16d59a769f 100644
+index 3d201b26d3..0a690a3bb4 100644
 --- a/osu.Game/Screens/Play/SubmittingPlayer.cs
 +++ b/osu.Game/Screens/Play/SubmittingPlayer.cs
 @@ -86,7 +86,12 @@ private void load()
  
          protected override GameplayClockContainer CreateGameplayClockContainer(WorkingBeatmap beatmap, double gameplayStart) => new MasterGameplayClockContainer(beatmap, gameplayStart)
          {
-+#if HBXL
++#if OUNSU
 +            // The virtual track's clock drifts across GC pauses; validation only produced "check your audio drivers".
 +            ShouldValidatePlaybackRate = false,
 +#else
@@ -762,11 +730,11 @@ index 3d201b26d3..16d59a769f 100644
                  return false;
              }
  
-+#if HBXL
++#if OUNSU
 +            // Switch 2 port: ppy's server only accepts score submission from official builds, so the token request is
 +            // always refused, and every play showed "Score will not be submitted" (2026-11-09). Don't ask; the score is
-+            // still saved locally. Also one pointless request to ppy less per play. OSU_HBXL_SUBMIT=1 asks again.
-+            if (Environment.GetEnvironmentVariable("OSU_HBXL_SUBMIT") != "1")
++            // still saved locally. Also one pointless request to ppy less per play. OUNSU_SUBMIT=1 asks again.
++            if (Environment.GetEnvironmentVariable("OUNSU_SUBMIT") != "1")
 +            {
 +                handleTokenFailure(new InvalidOperationException("Score submission needs an official build."), displayNotification: false);
 +                return false;
@@ -777,14 +745,14 @@ index 3d201b26d3..16d59a769f 100644
  
              if (req == null)
 diff --git a/osu.Game/Utils/BindableValueAccessor.cs b/osu.Game/Utils/BindableValueAccessor.cs
-index a4cd356339..07e6a22e56 100644
+index a4cd356339..76efd565f1 100644
 --- a/osu.Game/Utils/BindableValueAccessor.cs
 +++ b/osu.Game/Utils/BindableValueAccessor.cs
 @@ -16,6 +16,11 @@ internal static class BindableValueAccessor
  
          public static object GetValue(IBindable bindable)
          {
-+#if HBXL
++#if OUNSU
 +            // Switch 2 port (NativeAOT): MakeGenericMethod over value types needs code that was never compiled.
 +            if (bindable is INotifyValueChangedUntyped untyped)
 +                return untyped.ValueUntyped;
@@ -796,7 +764,7 @@ index a4cd356339..07e6a22e56 100644
  
          public static void SetValue(IBindable bindable, object value)
          {
-+#if HBXL
++#if OUNSU
 +            // Switch 2 port: Bindable<T>.Parse assigns a boxed T directly (no MakeGenericMethod).
 +            if (bindable is INotifyValueChangedUntyped && bindable is IParseable parseable)
 +            {
@@ -808,23 +776,23 @@ index a4cd356339..07e6a22e56 100644
              if (bindableWithValueType == null)
                  return;
 diff --git a/osu.Game/osu.Game.csproj b/osu.Game/osu.Game.csproj
-index caaaf54c46..080fdb5f91 100644
+index caaaf54c46..9724e108e3 100644
 --- a/osu.Game/osu.Game.csproj
 +++ b/osu.Game/osu.Game.csproj
 @@ -17,6 +17,18 @@
        <PackagePath>icon.png</PackagePath>
      </None>
    </ItemGroup>
-+  <!-- Switch 2 (HBLauncher) console build: dotnet publish -p:HbxlBuild=true -->
-+  <PropertyGroup Condition="'$(HbxlBuild)' == 'true'">
-+    <DefineConstants>$(DefineConstants);HBXL;HBXL_DETACH;HBXL_SETTINGS;HBXL_HUBS</DefineConstants>
++  <!-- ounsu! (Switch 2) console build: dotnet publish -p:OunsuBuild=true -->
++  <PropertyGroup Condition="'$(OunsuBuild)' == 'true'">
++    <DefineConstants>$(DefineConstants);OUNSU;OUNSU_DETACH;OUNSU_SETTINGS;OUNSU_HUBS</DefineConstants>
 +  </PropertyGroup>
-+  <!-- Desktop test of the AutoMapper-free detach (HbxlRealmCopier): dotnet test -p:HbxlDetachTest=true.
-+       HBXL_SETTINGS (both builds): SettingsOverlay.CreateExtraSections, for console/osu-game's "Switch 2" section. -->
-+  <PropertyGroup Condition="'$(HbxlDetachTest)' == 'true'">
-+    <DefineConstants>$(DefineConstants);HBXL_DETACH;HBXL_SETTINGS;HBXL_HUBS</DefineConstants>
++  <!-- Desktop test of the AutoMapper-free detach (OunsuRealmCopier): dotnet test -p:OunsuDetachTest=true.
++       OUNSU_SETTINGS (both builds): SettingsOverlay.CreateExtraSections, for console/osu-game's "Switch 2" section. -->
++  <PropertyGroup Condition="'$(OunsuDetachTest)' == 'true'">
++    <DefineConstants>$(DefineConstants);OUNSU_DETACH;OUNSU_SETTINGS;OUNSU_HUBS</DefineConstants>
 +  </PropertyGroup>
-+  <ItemGroup Label="Local framework (Switch 2 port: ../osu-framework, HBXL-patched)">
++  <ItemGroup Label="Local framework (Switch 2 port: ../osu-framework, patched)">
 +    <ProjectReference Include="..\..\osu-framework\osu.Framework\osu.Framework.csproj" />
 +  </ItemGroup>
    <ItemGroup Label="Package References">
@@ -840,31 +808,31 @@ index caaaf54c46..080fdb5f91 100644
      <PackageReference Include="SharpCompress" Version="0.50.4"/>
 diff --git a/Directory.Build.targets b/Directory.Build.targets
 new file mode 100644
-index 0000000000..21d4957ccd
+index 0000000000..1b6aad73b0
 --- /dev/null
 +++ b/Directory.Build.targets
 @@ -0,0 +1,11 @@
 +<Project>
-+  <!-- osu-HBLauncher (Switch 2 port): version stamp for osu.Game and the rulesets, like ppy's release builds get from CI.
++  <!-- ounsu! (Switch 2 port): version stamp for osu.Game and the rulesets, like ppy's release builds get from CI.
 +       Skin layouts name their component types with assembly versions ("osu.Game, Version=2026.807.0.0"), and a reference
 +       to a higher version than the loaded assembly doesn't resolve, so with the default 0.0.0 every saved layout fell back
 +       to the defaults. Stamped with the build date in osu!'s yyyy.Mdd scheme, so it is never older than a release made
 +       before the build. Imported after each project file, so it overrides osu.Game.csproj's 0.0.0. The console entry
 +       assembly (console/osu-game, outside this tree) stays 0.0.0 on purpose: osu! treats that one as "not deployed". -->
-+  <PropertyGroup Condition="'$(HbxlBuild)' == 'true' Or '$(HbxlDetachTest)' == 'true'">
++  <PropertyGroup Condition="'$(OunsuBuild)' == 'true' Or '$(OunsuDetachTest)' == 'true'">
 +    <Version>$([System.DateTime]::Now.ToString('yyyy.Mdd')).0</Version>
 +  </PropertyGroup>
 +</Project>
-diff --git a/osu.Game/Database/HbxlRealmCopier.cs b/osu.Game/Database/HbxlRealmCopier.cs
+diff --git a/osu.Game/Database/OunsuRealmCopier.cs b/osu.Game/Database/OunsuRealmCopier.cs
 new file mode 100644
-index 0000000000..229fcdd9bf
+index 0000000000..9fd28a48e3
 --- /dev/null
-+++ b/osu.Game/Database/HbxlRealmCopier.cs
++++ b/osu.Game/Database/OunsuRealmCopier.cs
 @@ -0,0 +1,282 @@
 +// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 +// See the LICENCE file in the repository root for full licence text.
 +
-+#if HBXL_DETACH
++#if OUNSU_DETACH
 +using System;
 +using System.Collections;
 +using System.Collections.Concurrent;
@@ -881,7 +849,7 @@ index 0000000000..229fcdd9bf
 +namespace osu.Game.Database
 +{
 +    /// <summary>
-+    /// Switch 2 (HBLauncher) port: AutoMapper-free replacement for the mappers in <see cref="RealmObjectExtensions"/>.
++    /// Switch 2 port: AutoMapper-free replacement for the mappers in <see cref="RealmObjectExtensions"/>.
 +    /// </summary>
 +    /// <remarks>
 +    /// AutoMapper doesn't work under NativeAOT: sealing a <c>MapperConfiguration</c> reflects over generic
@@ -898,7 +866,7 @@ index 0000000000..229fcdd9bf
 +    /// Like the original <c>MaxDepth</c> maps (which preserve references), <see cref="BeatmapInfo"/> and
 +    /// <see cref="BeatmapSetInfo"/> are detached once per graph, so cycles between them resolve to the same instance.
 +    /// </remarks>
-+    internal static class HbxlRealmCopier
++    internal static class OunsuRealmCopier
 +    {
 +        private static readonly ConcurrentDictionary<Type, PropertyInfo[]> detach_properties = new ConcurrentDictionary<Type, PropertyInfo[]>();
 +        private static readonly ConcurrentDictionary<Type, PropertyInfo[]> write_properties = new ConcurrentDictionary<Type, PropertyInfo[]>();
@@ -1143,16 +1111,16 @@ index 0000000000..229fcdd9bf
 +    }
 +}
 +#endif
-diff --git a/osu.Game/IO/HbxlFileResourceStore.cs b/osu.Game/IO/HbxlFileResourceStore.cs
+diff --git a/osu.Game/IO/OunsuFileResourceStore.cs b/osu.Game/IO/OunsuFileResourceStore.cs
 new file mode 100644
-index 0000000000..9053b7f4fd
+index 0000000000..2e995ed51e
 --- /dev/null
-+++ b/osu.Game/IO/HbxlFileResourceStore.cs
++++ b/osu.Game/IO/OunsuFileResourceStore.cs
 @@ -0,0 +1,98 @@
 +// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 +// See the LICENCE file in the repository root for full licence text.
 +
-+#if HBXL
++#if OUNSU
 +using System;
 +using System.Collections.Generic;
 +using System.IO;
@@ -1165,20 +1133,20 @@ index 0000000000..9053b7f4fd
 +namespace osu.Game.IO
 +{
 +    /// <summary>
-+    /// Switch 2 (HBLauncher) port: an assembly's embedded resources served from loose files.
++    /// Switch 2 port: an assembly's embedded resources served from loose files.
 +    /// The console binary is limited by the SDK heap, so the NativeAOT build drops
 +    /// osu.Game.Resources' embedded assets (ILLink substitutions) and they are extracted on the PC
 +    /// as files named by their manifest resource names (tools/resource-extract). Lookups follow
 +    /// <see cref="DllResourceStore"/>'s naming exactly; anything not on disk (e.g. compiled
 +    /// .resources tables) falls back to the assembly.
 +    /// </summary>
-+    public class HbxlFileResourceStore : IResourceStore<byte[]>
++    public class OunsuFileResourceStore : IResourceStore<byte[]>
 +    {
 +        private readonly string directory;
 +        private readonly string prefix;
 +        private readonly DllResourceStore fallback;
 +
-+        public HbxlFileResourceStore(string directory, Assembly assembly)
++        public OunsuFileResourceStore(string directory, Assembly assembly)
 +        {
 +            this.directory = directory;
 +            prefix = assembly.GetName().Name!;
@@ -1247,18 +1215,18 @@ index 0000000000..9053b7f4fd
 +    }
 +}
 +#endif
-diff --git a/osu.Game/Online/HbxlMessagePackHubProtocol.cs b/osu.Game/Online/HbxlMessagePackHubProtocol.cs
+diff --git a/osu.Game/Online/OunsuMessagePackHubProtocol.cs b/osu.Game/Online/OunsuMessagePackHubProtocol.cs
 new file mode 100644
-index 0000000000..50ca8efcaf
+index 0000000000..057207d52e
 --- /dev/null
-+++ b/osu.Game/Online/HbxlMessagePackHubProtocol.cs
++++ b/osu.Game/Online/OunsuMessagePackHubProtocol.cs
 @@ -0,0 +1,882 @@
-+// Switch 2 port (osu-HBLauncher). The message framing below is a port of ASP.NET Core's MessagePackHubProtocolWorker,
++// Switch 2 port (ounsu!). The message framing below is a port of ASP.NET Core's MessagePackHubProtocolWorker,
 +// BinaryMessageParser and BinaryMessageFormatter (v10.0.0):
 +//   Licensed to the .NET Foundation under one or more agreements.
 +//   The .NET Foundation licenses this file to you under the MIT license.
 +
-+#if HBXL_HUBS
++#if OUNSU_HUBS
 +
 +using System;
 +using System.Buffers;
@@ -1284,12 +1252,12 @@ index 0000000000..50ca8efcaf
 +    /// The stock <c>MessagePackHubProtocol</c> hands every argument to <c>MessagePackSerializer.Serialize(Type, ref writer, ...)</c>.
 +    /// That non-generic entry point is built from expression trees and throws "MessagePackWriter/Reader overload is not
 +    /// supported in MessagePackSerializer.NonGenerics" under NativeAOT: the hubs connected, but no call ever went out.
-+    /// Here every type that crosses the wire is listed in <see cref="HbxlHubTypes"/> and goes through the generic API, with
++    /// Here every type that crosses the wire is listed in <see cref="OunsuHubTypes"/> and goes through the generic API, with
 +    /// the formatters MessagePack's source generator already puts into osu.Game. The bytes are the same as the stock
-+    /// protocol's (console/osu-game: OSU_HBXL_HUB_SELFTEST).
++    /// protocol's (console/osu-game: OUNSU_HUB_SELFTEST).
 +    /// Only the metadata hub's types are listed (online users, presence, beatmap updates, daily challenge).
 +    /// </remarks>
-+    public sealed class HbxlMessagePackHubProtocol : IHubProtocol
++    public sealed class OunsuMessagePackHubProtocol : IHubProtocol
 +    {
 +        private const int error_result = 1;
 +        private const int void_result = 2;
@@ -1297,12 +1265,12 @@ index 0000000000..50ca8efcaf
 +
 +        private readonly MessagePackSerializerOptions options;
 +
-+        public HbxlMessagePackHubProtocol()
-+            : this(HbxlHubTypes.OPTIONS)
++        public OunsuMessagePackHubProtocol()
++            : this(OunsuHubTypes.OPTIONS)
 +        {
 +        }
 +
-+        public HbxlMessagePackHubProtocol(MessagePackSerializerOptions options)
++        public OunsuMessagePackHubProtocol(MessagePackSerializerOptions options)
 +        {
 +            this.options = options;
 +        }
@@ -1436,7 +1404,7 @@ index 0000000000..50ca8efcaf
 +            }
 +            catch (Exception ex)
 +            {
-+                HbxlHubTypes.ReportFailure($"binding arguments of {target}", ex);
++                OunsuHubTypes.ReportFailure($"binding arguments of {target}", ex);
 +                return new InvocationBindingFailureMessage(invocationId, target, ExceptionDispatchInfo.Capture(ex));
 +            }
 +
@@ -1464,7 +1432,7 @@ index 0000000000..50ca8efcaf
 +            }
 +            catch (Exception ex)
 +            {
-+                HbxlHubTypes.ReportFailure($"binding arguments of {target}", ex);
++                OunsuHubTypes.ReportFailure($"binding arguments of {target}", ex);
 +                return new InvocationBindingFailureMessage(invocationId, target, ExceptionDispatchInfo.Capture(ex));
 +            }
 +
@@ -1489,7 +1457,7 @@ index 0000000000..50ca8efcaf
 +            }
 +            catch (Exception ex)
 +            {
-+                HbxlHubTypes.ReportFailure("binding a stream item", ex);
++                OunsuHubTypes.ReportFailure("binding a stream item", ex);
 +                return new StreamBindingFailureMessage(invocationId, ExceptionDispatchInfo.Capture(ex));
 +            }
 +
@@ -1541,7 +1509,7 @@ index 0000000000..50ca8efcaf
 +                        }
 +                        catch (Exception ex)
 +                        {
-+                            HbxlHubTypes.ReportFailure($"reading a result of type {itemType.Name}", ex);
++                            OunsuHubTypes.ReportFailure($"reading a result of type {itemType.Name}", ex);
 +                            error = $"Error trying to deserialize result to {itemType.Name}. {ex.Message}";
 +                            hasResult = false;
 +                        }
@@ -1659,7 +1627,7 @@ index 0000000000..50ca8efcaf
 +        {
 +            try
 +            {
-+                return HbxlHubTypes.Deserialize(ref reader, type, options);
++                return OunsuHubTypes.Deserialize(ref reader, type, options);
 +            }
 +            catch (Exception ex)
 +            {
@@ -1805,7 +1773,7 @@ index 0000000000..50ca8efcaf
 +            catch (Exception ex)
 +            {
 +                returnBuffer(buffer);
-+                HbxlHubTypes.ReportFailure($"writing a {message.GetType().Name}{(message is HubMethodInvocationMessage m ? $" ({m.Target})" : string.Empty)}", ex);
++                OunsuHubTypes.ReportFailure($"writing a {message.GetType().Name}{(message is HubMethodInvocationMessage m ? $" ({m.Target})" : string.Empty)}", ex);
 +                throw;
 +            }
 +        }
@@ -1948,7 +1916,7 @@ index 0000000000..50ca8efcaf
 +            else if (argument is RawResult result)
 +                writer.WriteRaw(result.RawSerializedData);
 +            else
-+                HbxlHubTypes.Serialize(ref writer, argument, options);
++                OunsuHubTypes.Serialize(ref writer, argument, options);
 +        }
 +
 +        private static void writeStreamIds(string[]? streamIds, ref MessagePackWriter writer)
@@ -1985,12 +1953,12 @@ index 0000000000..50ca8efcaf
 +    }
 +
 +    /// <summary>
-+    /// The types <see cref="HbxlMessagePackHubProtocol"/> can put on the wire, each with code compiled ahead of time.
++    /// The types <see cref="OunsuMessagePackHubProtocol"/> can put on the wire, each with code compiled ahead of time.
 +    /// To support another hub method, add its argument and return types to <see cref="types"/> (and, for nullable structs,
 +    /// arrays or enums that are members of other types, a formatter to <see cref="Resolver.formatters"/>), then add a case to
 +    /// the self-test in console/osu-game.
 +    /// </summary>
-+    public static class HbxlHubTypes
++    public static class OunsuHubTypes
 +    {
 +        /// <summary>
 +        /// Serialisation failures so far (a type missing from the list, or data in an unexpected shape). Zero when all is well.
@@ -2074,7 +2042,7 @@ index 0000000000..50ca8efcaf
 +                }
 +            }
 +
-+            throw new NotSupportedException($"{value.GetType()} is not in the list of hub types (HbxlHubTypes).");
++            throw new NotSupportedException($"{value.GetType()} is not in the list of hub types (OunsuHubTypes).");
 +        }
 +
 +        public static object? Deserialize(ref MessagePackReader reader, Type type, MessagePackSerializerOptions options)
@@ -2099,7 +2067,7 @@ index 0000000000..50ca8efcaf
 +                return null;
 +            }
 +
-+            throw new NotSupportedException($"{type} is not in the list of hub types (HbxlHubTypes).");
++            throw new NotSupportedException($"{type} is not in the list of hub types (OunsuHubTypes).");
 +        }
 +
 +        private sealed class Resolver : IFormatterResolver

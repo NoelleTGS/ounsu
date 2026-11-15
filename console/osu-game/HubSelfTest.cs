@@ -12,13 +12,13 @@ using osu.Game.Online;
 using osu.Game.Online.Metadata;
 using osu.Game.Users;
 
-// OSU_HBXL_HUB_SELFTEST=<file>: checks osu.Game's HbxlMessagePackHubProtocol (the metadata hub's wire format without
+// OUNSU_HUB_SELFTEST=<file>: checks osu.Game's OunsuMessagePackHubProtocol (the metadata hub's wire format without
 // runtime code generation) offline. No network, nothing is sent anywhere.
 //   - Where runtime code generation works (dotnet run / a JIT build): every test message is written with SignalR's stock
 //     MessagePack protocol and with ours, the bytes must be equal, and the stock bytes are saved to <file>.
 //   - Under NativeAOT (desktop publish or the console): our bytes must equal the ones in <file>, and the stock bytes are
 //     parsed back with our protocol and written again, which must give the same bytes (so reading is right as well).
-// New hub types: add them to HbxlHubTypes and a message here, regenerate the file with the JIT build.
+// New hub types: add them to OunsuHubTypes and a message here, regenerate the file with the JIT build.
 static partial class Program
 {
     private sealed class TestBinder : IInvocationBinder
@@ -134,7 +134,7 @@ static partial class Program
 
     static int HubSelfTest(string file)
     {
-        var ours = new HbxlMessagePackHubProtocol();
+        var ours = new OunsuMessagePackHubProtocol();
         var messages = hubTestMessages();
         var binder = new TestBinder();
         int failures = 0;
@@ -238,7 +238,7 @@ static partial class Program
         }
 
         // A type that isn't listed has to fail as an exception (never a crash), and be counted.
-        int before = HbxlHubTypes.Failures;
+        int before = OunsuHubTypes.Failures;
 
         try
         {
@@ -247,7 +247,7 @@ static partial class Program
         }
         catch (NotSupportedException)
         {
-            if (HbxlHubTypes.Failures == before + 1)
+            if (OunsuHubTypes.Failures == before + 1)
                 Log("hub-selftest: ok unlisted type refused");
             else
                 fail("unlisted type: failure not counted");
@@ -316,7 +316,7 @@ static partial class Program
     }
 
     /// <summary>
-    /// OSU_HBXL_HUB_LIVETEST=http://127.0.0.1:5123: the real connector (HubClientConnector, as OnlineMetadataClient uses it)
+    /// OUNSU_HUB_LIVETEST=http://127.0.0.1:5123: the real connector (HubClientConnector, as OnlineMetadataClient uses it)
     /// against probes/hub-probe's local server. Never point this at anything but that server.
     /// </summary>
     static int HubLiveTest(string baseUrl)
@@ -448,11 +448,11 @@ static partial class Program
             connector.Dispose();
         }
 
-        if (HbxlHubTypes.Failures != 0)
-            fail($"{HbxlHubTypes.Failures} protocol failure(s) counted");
+        if (OunsuHubTypes.Failures != 0)
+            fail($"{OunsuHubTypes.Failures} protocol failure(s) counted");
 
         // --- 2: a hub that drops every connection at once. Upstream would reconnect every ~3 s for ever; the brake
-        // (PersistentEndpointClientConnector, HBXL_HUBS) allows the first connection, a second one after 3 s + 15 s,
+        // (PersistentEndpointClientConnector, OUNSU_HUBS) allows the first connection, a second one after 3 s + 15 s,
         // and the third only after another minute. So: at most 2 connections in 45 s.
         int connects = 0;
         var started = System.Diagnostics.Stopwatch.StartNew();

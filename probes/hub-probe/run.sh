@@ -27,7 +27,7 @@ trap 'kill $SERVER 2>/dev/null; rm -rf "$DATA"' EXIT
 
 status=0
 XDG_DATA_HOME="$DATA" XDG_CONFIG_HOME="$DATA" SDL_VIDEODRIVER=dummy \
-OSU_HBXL_HUB_LIVETEST="http://127.0.0.1:$PORT" DOTNET_DefaultStackSize=100000 \
+OUNSU_HUB_LIVETEST="http://127.0.0.1:$PORT" DOTNET_DefaultStackSize=100000 \
     LD_LIBRARY_PATH="$ROOT/src/native/ffmpeg/build-desktop/lib" timeout -s KILL 120 "$CLIENT" > "$DATA/client.log" 2>&1 || status=1
 grep -a "hub-livetest\|hub protocol" "$DATA/client.log" || status=1
 grep -aq "hub-livetest: done, 0 failure" "$DATA/client.log" || status=1

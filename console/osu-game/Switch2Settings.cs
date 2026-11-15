@@ -1,4 +1,4 @@
-// osu! on Switch 2 (kaiHEN): the "Switch 2" section of the in-game settings.
+// ounsu! (osu! on Switch 2): the "Switch 2" section of the in-game settings.
 //
 // Display, gyro aiming, Joy-Con mouse and USB keyboard/mouse options live only here (LX_NO_KBMOUSE=1 in lx-env is the
 // one escape hatch). The audio output queue and the diagnostics are here too but keep their lx-env lines, because a bad
@@ -48,10 +48,10 @@ public enum Switch2Setting
 
 public partial class Switch2Config : IniConfigManager<Switch2Setting>
 {
-    /// <summary>Gyro buttons in the order of hbxl_input_set_gyro's index (shim/lx_input.c).</summary>
+    /// <summary>Gyro buttons in the order of ounsu_input_set_gyro's index (shim/lx_input.c).</summary>
     public static readonly string[] GYRO_BUTTONS = { "Off", "B", "L", "R", "ZL", "ZR", "L3", "R3" };
 
-    /// <summary>Joy-Con mouse choices; the index is hbxl_input_set_joymouse's side mask (bit 0 left, bit 1 right).</summary>
+    /// <summary>Joy-Con mouse choices; the index is ounsu_input_set_joymouse's side mask (bit 0 left, bit 1 right).</summary>
     public static readonly string[] JOYCON_MOUSE = { "Off", "Left Joy-Con only", "Right Joy-Con only", "Both Joy-Cons" };
 
     /// <summary>Display choices and the window height each one asks the host for (0: the console's default).</summary>
@@ -77,7 +77,7 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
 
     private readonly Storage storage;
 
-    /// <summary>HBXL_GC_LOG's threshold (ms) for the log line per collection; the setting only turns the line on and off.</summary>
+    /// <summary>LX_GC_LOG's threshold (ms) for the log line per collection; the setting only turns the line on and off.</summary>
     private int gcLogMinPause;
 
     public Switch2Config(Storage storage)
@@ -110,11 +110,11 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
         SetDefault(Switch2Setting.FrameRate, FRAME_RATE[0]);
 
         // The audio queue and the diagnostics keep their lx-env lines, which are the defaults here.
-        SetDefault(Switch2Setting.AudioPeriod, envInt("HBXL_AUDIO_PERIOD", 128, 16, 1024), 16, 1024);
-        SetDefault(Switch2Setting.AudioBuffers, envInt("HBXL_AUDIO_BUFFERS", 2, 1, 16), 1, 16);
+        SetDefault(Switch2Setting.AudioPeriod, envInt("LX_AUDIO_PERIOD", 128, 16, 1024), 16, 1024);
+        SetDefault(Switch2Setting.AudioBuffers, envInt("LX_AUDIO_BUFFERS", 2, 1, 16), 1, 16);
 
-        // HBXL_GC_LOG: unset = every collection, 0 = off, N = only pauses of N ms and longer.
-        string? gcLog = env("HBXL_GC_LOG");
+        // LX_GC_LOG: unset = every collection, 0 = off, N = only pauses of N ms and longer.
+        string? gcLog = env("LX_GC_LOG");
         gcLogMinPause = gcLog != null && int.TryParse(gcLog, NumberStyles.Integer, CultureInfo.InvariantCulture, out int ms) && ms > 0 ? ms : 0;
         SetDefault(Switch2Setting.LogGarbageCollections, gcLog != "0");
     }
@@ -271,40 +271,40 @@ public partial class Switch2Config : IniConfigManager<Switch2Setting>
 
 internal static partial class Switch2Native
 {
-#if HBXL
-    [LibraryImport("hbxl", EntryPoint = "hbxl_input_set_gyro")]
-    private static partial void hbxl_input_set_gyro(int button, float speedX, float speedY, int invertX, int invertY);
+#if OUNSU
+    [LibraryImport("ounsu", EntryPoint = "ounsu_input_set_gyro")]
+    private static partial void ounsu_input_set_gyro(int button, float speedX, float speedY, int invertX, int invertY);
 
-    [LibraryImport("hbxl", EntryPoint = "hbxl_input_set_kbmouse")]
-    private static partial void hbxl_input_set_kbmouse(int enabled, float speed);
+    [LibraryImport("ounsu", EntryPoint = "ounsu_input_set_kbmouse")]
+    private static partial void ounsu_input_set_kbmouse(int enabled, float speed);
 
-    [LibraryImport("hbxl", EntryPoint = "hbxl_input_set_joymouse")]
-    private static partial void hbxl_input_set_joymouse(int sides, float speed);
+    [LibraryImport("ounsu", EntryPoint = "ounsu_input_set_joymouse")]
+    private static partial void ounsu_input_set_joymouse(int sides, float speed);
 
-    [LibraryImport("hbxl", EntryPoint = "hbxl_audio_set_queue")]
-    private static partial int hbxl_audio_set_queue(int period, int buffers);
+    [LibraryImport("ounsu", EntryPoint = "ounsu_audio_set_queue")]
+    private static partial int ounsu_audio_set_queue(int period, int buffers);
 
-    [LibraryImport("hbxl", EntryPoint = "hbxl_gc_log_set")]
-    private static partial void hbxl_gc_log_set(int minPauseMs);
+    [LibraryImport("ounsu", EntryPoint = "ounsu_gc_log_set")]
+    private static partial void ounsu_gc_log_set(int minPauseMs);
 
-    [LibraryImport("hbxl", EntryPoint = "hbxl_display_set")]
-    private static partial int hbxl_display_set(int handheldHeight, int dockedHeight, int fps);
+    [LibraryImport("ounsu", EntryPoint = "ounsu_display_set")]
+    private static partial int ounsu_display_set(int handheldHeight, int dockedHeight, int fps);
 
     public static void SetGyro(int button, float speedX, float speedY, bool invertX, bool invertY) =>
-        hbxl_input_set_gyro(button, speedX, speedY, invertX ? 1 : 0, invertY ? 1 : 0);
+        ounsu_input_set_gyro(button, speedX, speedY, invertX ? 1 : 0, invertY ? 1 : 0);
 
-    public static void SetKeyboardMouse(bool enabled, float speed) => hbxl_input_set_kbmouse(enabled ? 1 : 0, speed);
+    public static void SetKeyboardMouse(bool enabled, float speed) => ounsu_input_set_kbmouse(enabled ? 1 : 0, speed);
 
-    public static void SetJoyConMouse(int sides, float speed) => hbxl_input_set_joymouse(sides, speed);
+    public static void SetJoyConMouse(int sides, float speed) => ounsu_input_set_joymouse(sides, speed);
 
     /// <summary>Returns the queue length in microseconds, 0 while the shim's output isn't open.</summary>
-    public static int SetAudioQueue(int period, int buffers) => hbxl_audio_set_queue(period, buffers);
+    public static int SetAudioQueue(int period, int buffers) => ounsu_audio_set_queue(period, buffers);
 
-    public static void SetGcLog(int minPauseMs) => hbxl_gc_log_set(minPauseMs);
+    public static void SetGcLog(int minPauseMs) => ounsu_gc_log_set(minPauseMs);
 
     public static void SetDisplay(int handheldHeight, int dockedHeight, int fps)
     {
-        int r = hbxl_display_set(handheldHeight, dockedHeight, fps);
+        int r = ounsu_display_set(handheldHeight, dockedHeight, fps);
         Program.Log($"switch2 settings: display handheld {handheldHeight}, docked {dockedHeight}, {fps} fps: {r}");
     }
 #else
@@ -334,7 +334,7 @@ public partial class Switch2Section : SettingsSection
 
     public override Drawable CreateIcon() => new SpriteIcon { Icon = FontAwesome.Solid.Gamepad };
 
-    public override IEnumerable<LocalisableString> FilterTerms => base.FilterTerms.Concat(new LocalisableString[] { "console", "hbxl", "nintendo" });
+    public override IEnumerable<LocalisableString> FilterTerms => base.FilterTerms.Concat(new LocalisableString[] { "console", "nintendo", "ounsu" });
 
     public Switch2Section(Switch2Config config, Action importNow)
     {
@@ -603,7 +603,7 @@ public partial class Switch2Section : SettingsSection
 
         private void updateNote()
         {
-            // What the output really runs with, when it is open; the arithmetic otherwise (e.g. HBXL_AUDIO_SDL=1: not used at all).
+            // What the output really runs with, when it is open; the arithmetic otherwise (e.g. LX_AUDIO_SDL=1: not used at all).
             double ms = queueMs.Value > 0 ? queueMs.Value : period.Value * buffers.Value * 1000.0 / 48000;
             string text = $"Output delay: about {ms.ToString("0.0", CultureInfo.InvariantCulture)} ms.";
             buffersItem.Note.Value = new SettingsNote.Data(text, SettingsNote.Type.Informational);
@@ -621,7 +621,7 @@ public partial class Switch2Section : SettingsSection
                 new SettingsItemV2(new FormCheckBox
                 {
                     Caption = "Log every garbage collection",
-                    HintText = "One hbxl-gc line per collection in the log.",
+                    HintText = "One lx-gc line per collection in the log.",
                     Current = config.GetBindable<bool>(Switch2Setting.LogGarbageCollections),
                 })
                 {

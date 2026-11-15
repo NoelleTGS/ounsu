@@ -4,29 +4,25 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using osu.Framework;
 using osu.Framework.Logging;
-using osu.Framework.Screens;
 using osu.Framework.Platform;
 using osu.Game;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 
-// osu! (lazer) on Switch 2 (kaiHEN homebrew, Linux syscalls emulated by the host .nro): cut-down console entry point.
-// No Velopack/Discord/IPC/tournament (osu.Desktop's extras). Logs go through hbxl_log (the host's log: nxlink, and the
-// SD card with LX_LOG_FILE), and osu!'s own logs land on the SD card under the data root's
-// /home/.local/share/osu/logs, next to periodic screenshots (screenshots-console/, opt-in: HBXL_SCREENSHOT_EVERY=<s>).
-static unsafe partial class Program
+// ounsu!: osu! (lazer) on Switch 2 (kaiHEN homebrew, Linux syscalls emulated by the host .nro), cut-down entry point.
+// No Velopack/Discord/IPC/tournament (osu.Desktop's extras). Logs go through ounsu_log (the host's log: nxlink, and the
+// SD card with LX_LOG_FILE), and osu!'s own logs land on the SD card under the data root's /home/.local/share/osu/logs.
+static partial class Program
 {
-#if HBXL
-    [LibraryImport("hbxl", EntryPoint = "hbxl_log", StringMarshalling = StringMarshalling.Utf8)]
-    private static partial void hbxl_log(string text);
+#if OUNSU
+    [LibraryImport("ounsu", EntryPoint = "ounsu_log", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial void ounsu_log(string text);
 #else
-    private static void hbxl_log(string text) => Console.Error.WriteLine(text);
+    private static void ounsu_log(string text) => Console.Error.WriteLine(text);
 #endif
 
     internal static void Log(string s)
     {
         foreach (string line in ("osu-console: " + s).Split('\n'))
-            hbxl_log(line.Length > 400 ? line[..400] : line);
+            ounsu_log(line.Length > 400 ? line[..400] : line);
     }
 
     internal static string DataDir =>
@@ -46,7 +42,7 @@ static unsafe partial class Program
         }
     }
 
-#if HBXL
+#if OUNSU
     // NativeAOT: mods name custom setting controls (SettingSourceAttribute.SettingControlType) that osu! creates with
     // Activator.CreateInstance; constructed generic types only get a reflection-invokable constructor when something
     // asks for it ("No parameterless constructor defined for SettingsSlider<int, MuteComboSlider>"). Non-generic
@@ -75,7 +71,7 @@ static unsafe partial class Program
         typeof(System.Collections.Generic.List<Veldrid.VertexElementDescription>))]
 #endif
     /// <summary>
-    /// OSU_HBXL_JSON_SELFTEST=1: deserialize canned API responses offline (no network) and exit. NativeAOT trimming broke
+    /// OUNSU_JSON_SELFTEST=1: deserialize canned API responses offline (no network) and exit. NativeAOT trimming broke
     /// news/beatmap search (Cursor's [JsonExtensionData] dictionary) and beatmap sets (List of a struct), 2026-11-09;
     /// rd.xml (tools/gen-rdxml) fixes those. 0 = all passed.
     /// </summary>
@@ -156,15 +152,15 @@ static unsafe partial class Program
         int result;
 
         // osu!'s own log files are written by a background thread, so a hard death loses the last lines.
-        // Mirror every entry synchronously through hbxl_log instead.
+        // Mirror every entry synchronously through ounsu_log instead.
         Logger.NewEntry += mirrorLogEntry;
-        if (Environment.GetEnvironmentVariable("OSU_HBXL_JSON_SELFTEST") == "1")
+        if (Environment.GetEnvironmentVariable("OUNSU_JSON_SELFTEST") == "1")
             return JsonSelfTest();
-        if (Environment.GetEnvironmentVariable("OSU_HBXL_HUB_SELFTEST") is string hubGolden && hubGolden.Length > 0)
+        if (Environment.GetEnvironmentVariable("OUNSU_HUB_SELFTEST") is string hubGolden && hubGolden.Length > 0)
             return HubSelfTest(hubGolden);
-        if (Environment.GetEnvironmentVariable("OSU_HBXL_HUB_LIVETEST") is string hubUrl && hubUrl.Length > 0)
+        if (Environment.GetEnvironmentVariable("OUNSU_HUB_LIVETEST") is string hubUrl && hubUrl.Length > 0)
             return HubLiveTest(hubUrl);
-#if HBXL
+#if OUNSU
         // Construct the shader-cache list types once so ILC compiles them completely (see the attributes above).
         GC.KeepAlive(new System.Collections.Generic.List<Veldrid.ResourceLayoutDescription>(0));
         GC.KeepAlive(new System.Collections.Generic.List<Veldrid.ResourceLayoutElementDescription>(0));
@@ -174,7 +170,7 @@ static unsafe partial class Program
         // creates still has no compiled type, so Activator.CreateInstance threw "PlayerSliderBar`1[Int32] is missing native
         // code or metadata" (ReplayAnalysisSettings, every replay; 2026-11-09). Construct each one in a branch that never
         // runs, so ILC compiles the types completely.
-        if (Environment.GetEnvironmentVariable("HBXL_AOT_NEVER_SET") == "construct-setting-controls")
+        if (Environment.GetEnvironmentVariable("OUNSU_AOT_NEVER_SET") == "construct-setting-controls")
         {
             GC.KeepAlive(new osu.Game.Overlays.Settings.SettingsSlider<int, osu.Game.Rulesets.Mods.MuteComboSlider>());
             GC.KeepAlive(new osu.Game.Overlays.Settings.SettingsSlider<int, osu.Game.Rulesets.Mods.HiddenComboSlider>());
@@ -198,16 +194,10 @@ static unsafe partial class Program
             });
             Log($"stage 1: ok ({host.GetType().Name})");
 
-            // No auto-exit unless HBXL_EXIT_AFTER=<s> is set (a test aid; it used to default to 120 s).
-            int exitAfter = int.TryParse(Environment.GetEnvironmentVariable("HBXL_EXIT_AFTER"), out int s) && s > 0 ? s : 0;
-            Log(exitAfter > 0 ? $"stage 2: host.Run(OsuGame), exits by itself after {exitAfter} s" : "stage 2: host.Run(OsuGame)");
-            game = new ConsoleOsuGame(exitAfter);
+            Log("stage 2: host.Run(OsuGame)");
+            game = new ConsoleOsuGame();
             var hostForStatus = host;
-            var status = new System.Threading.Thread(() => statusLoop(hostForStatus)) { IsBackground = true, Name = "osu-console status" };
-            status.Start();
-#if HBXL
-            new System.Threading.Thread(gcWatch) { IsBackground = true, Name = "osu-console gcwatch" }.Start();
-#endif
+            new System.Threading.Thread(() => statusLoop(hostForStatus)) { IsBackground = true, Name = "osu-console status" }.Start();
             host.Run(game);
             Log("RESULT: host.Run returned");
             result = 0;
@@ -224,40 +214,12 @@ static unsafe partial class Program
         return result;
     }
 
-    // Screen loads that never finish (song select): set by mirrorLogEntry from the screen stack's
-    // "📺 ... loading X" / "entered X" / "exit from X" lines, checked by statusLoop.
-    private static readonly System.Text.RegularExpressions.Regex screen_event =
-        new System.Text.RegularExpressions.Regex(@"📺 .*\) (loading|entered|exit from) (\S+)");
-
-    private static volatile string? loadingScreen;
-    private static DateTime loadingSince;
-
-    static void trackScreenLoad(string? message)
-    {
-        if (message == null || !message.Contains("📺"))
-            return;
-
-        var m = screen_event.Match(message);
-        if (!m.Success)
-            return;
-
-        if (m.Groups[1].Value == "loading")
-        {
-            loadingSince = DateTime.UtcNow;
-            loadingScreen = m.Groups[2].Value;
-        }
-        else if (m.Groups[2].Value == loadingScreen)
-            loadingScreen = null;
-    }
-
     static void mirrorLogEntry(LogEntry entry)
     {
         try
         {
             if (entry.Message?.Contains("That operation is not supported") == true)
                 return; // SDL spam
-
-            trackScreenLoad(entry.Message);
 
             string text = $"log [{entry.Target?.ToString() ?? entry.LoggerName}/{entry.Level}] {entry.Message}";
 
@@ -296,81 +258,13 @@ static unsafe partial class Program
         }
     }
 
-#if HBXL
-    [LibraryImport("hbxl", EntryPoint = "hbxl_log")]
-    private static unsafe partial void hbxl_log_raw(byte* text);
-
-    /// <summary>
-    /// Allocation-free GC watch: during a GC storm every allocation waits for a full GC, so the status line (which formats
-    /// strings) goes silent. This thread never allocates after start, so it keeps logging between collections:
-    /// "hbxl-gcwatch: N MiB live-ish, gen0/1/2 +a/+b/+c in 2 s" whenever gen2 collections pile up (2026-11-09 freeze).
-    /// </summary>
-    static unsafe void gcWatch()
-    {
-        byte* buf = stackalloc byte[160];
-        int g0 = GC.CollectionCount(0), g1 = GC.CollectionCount(1), g2 = GC.CollectionCount(2);
-        while (true)
-        {
-            System.Threading.Thread.Sleep(2000);
-            int n0 = GC.CollectionCount(0), n1 = GC.CollectionCount(1), n2 = GC.CollectionCount(2);
-            if (n2 - g2 >= 3)
-            {
-                var span = new Span<byte>(buf, 159);
-                int at = 0;
-                void put(ReadOnlySpan<byte> text, Span<byte> dst, ref int pos) { text.CopyTo(dst[pos..]); pos += text.Length; }
-                void num(long value, Span<byte> dst, ref int pos) { System.Buffers.Text.Utf8Formatter.TryFormat(value, dst[pos..], out int w); pos += w; }
-                put("hbxl-gcwatch: heap "u8, span, ref at);
-                num(GC.GetTotalMemory(false) >> 20, span, ref at);
-                put(" MiB, allocated total "u8, span, ref at);
-                num(GC.GetTotalAllocatedBytes() >> 20, span, ref at);
-                put(" MiB, gen0/1/2 +"u8, span, ref at);
-                num(n0 - g0, span, ref at);
-                put("/+"u8, span, ref at);
-                num(n1 - g1, span, ref at);
-                put("/+"u8, span, ref at);
-                num(n2 - g2, span, ref at);
-                put(" in 2 s"u8, span, ref at);
-                buf[at] = 0;
-                hbxl_log_raw(buf);
-            }
-            g0 = n0; g1 = n1; g2 = n2;
-        }
-    }
-#endif
-
     static void statusLoop(GameHost host)
     {
-        double lastClock = -1;
-        int stalled = 0;
-        bool dumped = false;
-        string? lastStuckScreen = null;
-        int stuckDumps = 0;
-
         for (int i = 1; ; i++)
         {
             System.Threading.Thread.Sleep(10000);
             try
             {
-#if HBXL
-                // The update clock not moving for two intervals = the update thread is stuck: say so once.
-                double clock = host.UpdateThread?.Clock.CurrentTime ?? -1;
-                stalled = clock == lastClock ? stalled + 1 : 0;
-                lastClock = clock;
-                if (stalled >= 2 && !dumped)
-                {
-                    dumped = true;
-                    Log($"stall: update clock stuck at {clock / 1000:F1}s");
-                }
-
-                // A screen that has been loading for over 15 s (song select never finishes loading): once per screen.
-                string? stuck = loadingScreen;
-                if (stuck != null && stuck != lastStuckScreen && stuckDumps < 3 && DateTime.UtcNow - loadingSince > TimeSpan.FromSeconds(15))
-                {
-                    lastStuckScreen = stuck;
-                    stuckDumps++;
-                    Log($"stall: screen {stuck} still loading after {(DateTime.UtcNow - loadingSince).TotalSeconds:F0}s");
-                }
-#endif
                 var w = host.Window;
                 var gcInfo = GC.GetGCMemoryInfo();
                 Log($"status {i * 10}s: state {host.ExecutionState}, window {(w == null ? "none" : $"{w.WindowState} {w.ClientSize.Width}x{w.ClientSize.Height}")}, " +
@@ -390,20 +284,14 @@ static unsafe partial class Program
 }
 
 /// <summary>
-/// OsuGame that closes itself after a while (the console has no safe way to close it yet) and
-/// saves a screenshot every N seconds (opt-in) so frames can be inspected later.
+/// OsuGame with the console's extras: the "Switch 2" settings section, no GCs during gameplay and the import folder.
 /// </summary>
 public partial class ConsoleOsuGame : OsuGame
 {
-    private readonly int exitAfterSeconds;
-    private int shots;
-    private int screenshotEvery;
-
-    public ConsoleOsuGame(int exitAfterSeconds)
+    public ConsoleOsuGame()
         : base(Array.Empty<string>())
     {
-        this.exitAfterSeconds = exitAfterSeconds;
-#if HBXL_SETTINGS
+#if OUNSU_SETTINGS
         // The settings overlay asks for the section when it loads (after LoadComplete below has made the config).
         osu.Game.Overlays.SettingsOverlay.CreateExtraSections = () => switch2Config == null
             ? Array.Empty<osu.Game.Overlays.Settings.SettingsSection>()
@@ -454,7 +342,6 @@ public partial class ConsoleOsuGame : OsuGame
     // tasks, and it is shared with every DelayedLoadWrapper in the game. Opening the dashboard with a long friends
     // list (one wrapper per panel) while importTick repeated there crashed the game, 2026-11-11.
     private double nextImportTick;
-    private double nextScreenshot;
 
     protected override void Update()
     {
@@ -465,12 +352,6 @@ public partial class ConsoleOsuGame : OsuGame
             nextImportTick = Clock.CurrentTime + 1000;
             importTick();
         }
-
-        if (screenshotEvery > 0 && nextScreenshot > 0 && Clock.CurrentTime >= nextScreenshot)
-        {
-            nextScreenshot = Clock.CurrentTime + screenshotEvery * 1000;
-            takeScreenshot();
-        }
     }
 
     protected override void LoadComplete()
@@ -479,47 +360,12 @@ public partial class ConsoleOsuGame : OsuGame
         loadSwitch2Config();
         base.LoadComplete();
         Program.Log("stage 3: OsuGame LoadComplete");
-        // Diagnostic screenshots are opt-in (HBXL_SCREENSHOT_EVERY=<seconds>): each one is a full-frame GPU readback plus a
-        // PNG encode, and froze update + draw for ~1.4-1.9 s every 15 s (stall detector, 2026-11-09).
-        if (int.TryParse(Environment.GetEnvironmentVariable("HBXL_SCREENSHOT_EVERY"), out screenshotEvery) && screenshotEvery > 0)
-            nextScreenshot = Clock.CurrentTime + screenshotEvery * 1000;
         importFromFolder(everything: true, byUser: false);
         nextImportTick = Clock.CurrentTime + 1000;
-
-        // Test hook: HBXL_TEST_SONGSELECT=<s> opens song select after <s> seconds (like pressing Play).
-        if (int.TryParse(Environment.GetEnvironmentVariable("HBXL_TEST_SONGSELECT"), out int songSelectAfter) && songSelectAfter > 0)
-        {
-            Scheduler.AddDelayed(() =>
-            {
-                Program.Log("test: opening song select");
-                PerformFromScreen(s => s.Push(new osu.Game.Screens.Select.SoloSongSelect()));
-            }, songSelectAfter * 1000);
-        }
-
-#if HBXL_SETTINGS
-        // Test hook: HBXL_TEST_SETTINGS=<s> opens the settings at the "Switch 2" section after <s> seconds.
-        if (int.TryParse(Environment.GetEnvironmentVariable("HBXL_TEST_SETTINGS"), out int settingsAfter) && settingsAfter > 0)
-        {
-            Scheduler.AddDelayed(() =>
-            {
-                Program.Log("test: opening the Switch 2 settings");
-                Settings.ShowAtControl<Switch2Section>();
-            }, settingsAfter * 1000);
-        }
-#endif
-
-        if (exitAfterSeconds > 0)
-        {
-            Scheduler.AddDelayed(() =>
-            {
-                Program.Log("stage 4: exit timer reached");
-                Exit();
-            }, exitAfterSeconds * 1000);
-        }
     }
 
     /// <summary>
-    /// Beatmaps (.osz/.olz), skins (.osk) and replays (.osr) placed in the import folder (HBXL_IMPORT_DIR, default
+    /// Beatmaps (.osz/.olz), skins (.osk) and replays (.osr) placed in the import folder (OUNSU_IMPORT_DIR, default
     /// /import in the data root on the SD card) are imported as if dropped on the window: everything at startup and from the
     /// "Switch 2" settings' button, and new files on each automatic check (settings: on/off and interval).
     /// A file is moved out of the folder the moment it is picked up, into importing/, so no later check or button
@@ -559,7 +405,7 @@ public partial class ConsoleOsuGame : OsuGame
         }
 
         importCheckedAt = Clock.CurrentTime;
-        string dir = Environment.GetEnvironmentVariable("HBXL_IMPORT_DIR") ?? "/import";
+        string dir = Environment.GetEnvironmentVariable("OUNSU_IMPORT_DIR") ?? "/import";
 
         void notify(string text, bool error = false)
         {
@@ -678,34 +524,6 @@ public partial class ConsoleOsuGame : OsuGame
             finally
             {
                 System.Threading.Interlocked.Exchange(ref importBusy, 0);
-            }
-        });
-    }
-
-    private void takeScreenshot()
-    {
-        int n = ++shots;
-        Host.TakeScreenshotAsync().ContinueWith(t =>
-        {
-            try
-            {
-                string dir = Path.Combine(Program.DataDir, "screenshots-console");
-                Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, $"shot-{n * screenshotEvery:000}s.png");
-                using var image = t.Result;
-                // The swapchain is RGBA but the framework's readback assumes BGRA: swap back.
-                image.ProcessPixelRows(rows =>
-                {
-                    for (int y = 0; y < rows.Height; y++)
-                        foreach (ref Rgba32 p in rows.GetRowSpan(y))
-                            (p.R, p.B) = (p.B, p.R);
-                });
-                image.SaveAsPng(file);
-                Program.Log($"screenshot {file}");
-            }
-            catch (Exception e)
-            {
-                Program.Log("screenshot FAILED: " + e.Message);
             }
         });
     }

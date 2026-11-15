@@ -6,7 +6,7 @@
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
-TC=${LX_MUSL_TOOLCHAIN:-$HOME/osu-HBLauncher/toolchain-src/toolchain}
+TC=${LX_MUSL_TOOLCHAIN:-$ROOT/toolchain}
 cd "$HERE"
 if [ "${1:-}" = desktop ]; then
     dotnet publish -c Release -nologo -r linux-x64 -p:StaticExecutable=false -o obj/desktop
@@ -18,9 +18,10 @@ CA="$HERE/certs/ca.pem"
 export LX_CAPTURE="$HERE/obj/link-capture.txt"
 mkdir -p "$HERE/obj" "$HERE/build" "$HERE/obj/romfs/net-probe" "$HERE/obj/romfs/usr/local/ssl"
 install -m 644 "$CA" "$HERE/obj/romfs/net-probe/ca.pem"
+printf 'NETPROBE_HOST=%s\n' "$(cat "$HERE/certs/host.txt")" > "$HERE/obj/romfs/lx-env"   # the server's PC address
 install -m 644 "$ROOT/fsroot/usr/local/ssl/cert.pem" "$HERE/obj/romfs/usr/local/ssl/cert.pem"
 python3 "$ROOT/tools/gen-ssl-syms.py" "$TC/bin/aarch64-linux-musl-nm" "$HERE/obj/ssl_syms.c" "$SSL/libssl.a" "$SSL/libcrypto.a"
-dotnet publish -c Release -nologo -p:CppCompilerAndLinker="$ROOT/probes/aot-hello/tools/capture-link.sh"
+dotnet publish -c Release -nologo -p:CppCompilerAndLinker="$ROOT/tools/capture-link.sh"
 python3 "$ROOT/tools/aot-island.py" "$LX_CAPTURE" "$HERE" "$HERE/build/island.o" "$HERE/obj/ssl_syms.c" \
     -Wl,--start-group "$SSL/libssl.a" "$SSL/libcrypto.a" -Wl,--end-group
 make -s -C "$ROOT/lx/host" ISLAND="$HERE/build/island.o" APP=net-probe APP_TITLE="lx Net probe" OUT="$HERE/build" \

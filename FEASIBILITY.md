@@ -379,3 +379,24 @@ Tablet: Wacom CTL-671 (056a:0301) with a custom high-polling-rate firmware. Open
   no more lazer logo as the icon (`console/osu-game/icon.jpg`, the user's own, is used if present), and the SD root
   `/switch/ounsu` (was `/switch/osu`; existing cards need the folder renamed). The README says it's unofficial and not
   affiliated with ppy. Inside the game, osu!'s own branding stays as ppy's code and resources draw it.
+
+## 2026-11-15: pre-release sweep (HBXL names gone, native builds in this repo)
+
+- **Names.** Every `HBXL`/`Hbxl`/`hbxl` identifier became `OUNSU`/`Ounsu`/`ounsu` (defines, build properties, classes,
+  the `DirectPInvoke "ounsu"` glue, environment variables); realm-core's `HBX_SWITCH2` became `OUNSU_ISLAND`. The one
+  exception is `__hbx_syscall`, which the musl toolchain is built with. Found on the way: the "Switch 2" settings read
+  `HBXL_AUDIO_PERIOD/BUFFERS` and `HBXL_GC_LOG` for their defaults while the shims read `LX_*`; both use `LX_*` now,
+  with the same meaning (`LX_GC_LOG` unset: every GC, 0: none, N: pauses of N ms and more).
+- **Native libraries.** `tools/build-native.sh` builds SDL3, SQLite, OpenSSL, FFmpeg, veldrid-spirv and Realm into
+  `src/native/*/build-lx` with `tools/musl-toolchain.cmake`; the builds reused from the HBLauncher version
+  (`build-hbx`, configured with a toolchain file from another repository) are no longer used. Checked against them:
+  SDL's generated build config is identical, SQLite's compile options and object size are identical, veldrid-spirv
+  and Realm produce the same set of archives. `tools/fetch-sources.sh` checks the sources out at the pinned commits and
+  applies the patches (tested on mysoundlib, SQLite and veldrid-spirv: identical to the working checkouts), and
+  `patches/musl.md` has the toolchain recipe with HBLauncher's syscall-hook patch.
+- **SDL is unmodified.** The HBLauncher `hbx` audio/joystick drivers were never used on kaiHEN (they declined because
+  `hbxl_ctx` was NULL). Without them the stubs in `shim/lx_osu.c` go too, and `patches/SDL.diff` is empty.
+- **Removed:** Program.cs's GC watch thread, stall and screen-load detectors, periodic screenshots, test hooks and exit
+  timer (HBLauncher-era diagnostics); the silent stopwatch track for maps (`OUNSU_NO_AUDIO`, from before audio worked);
+  `probes/usb-probe` (the findings are above); `vk-include/` (symlinks into `/usr/include`; the musl compiler now uses
+  OunceVK's headers, which match the driver).

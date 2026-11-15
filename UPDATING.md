@@ -6,7 +6,7 @@ How to move the port to a newer osu! release. The console build doesn't use ppy'
 | Piece | Where | Pinned in | Our changes |
 |---|---|---|---|
 | osu! | `src/osu` ([ppy/osu](https://github.com/ppy/osu)) | `patches/osu.base` | `patches/osu.diff`, described in `patches/osu.md` |
-| osu-framework | `src/osu-framework` ([ppy/osu-framework](https://github.com/ppy/osu-framework)) | `patches/osu-framework.base` | `patches/osu-framework.diff` (PR #6002 + `#if HBXL`), `patches/osu-framework.md` |
+| osu-framework | `src/osu-framework` ([ppy/osu-framework](https://github.com/ppy/osu-framework)) | `patches/osu-framework.base` | `patches/osu-framework.diff` (PR #6002 + `#if OUNSU`), `patches/osu-framework.md` |
 | Game resources | NuGet `ppy.osu.Game.Resources` → loose files on the SD card | `src/osu/osu.Game/osu.Game.csproj` | `tools/resource-extract`, `console/osu-game/osu-resources.substitutions.xml` |
 
 Things you **don't** update by hand:
@@ -15,7 +15,8 @@ Things you **don't** update by hand:
 - **The console app's version.** It stays `0.0.0` (`console/osu-game/osu-game.csproj`) so osu! treats it as a
   self-built client. The `.nro`'s own version shown in hbmenu is stamped by `console/osu-game/build.sh`
   from the build date (osu!'s `yyyy.Mdd.N` scheme), so there's nothing to bump.
-- **`~/osu`**, the untouched reference checkout. `src/osu`'s `origin` points at it, so fetch from GitHub instead (below).
+- A separate, untouched osu! checkout, if you keep one for reference. Fetch from GitHub (below), whatever `src/osu`'s
+  `origin` points at.
 - The native libraries (SDL3, Realm, FFmpeg, OpenSSL, veldrid-spirv). They only need attention if the new version raises a
   package that wraps them (see step 2).
 
@@ -26,7 +27,7 @@ Never work around the server's refusal of self-built clients (version hash, clie
 ## 0. Before you start
 
 ```sh
-cd ~/switch2hax/ounsu
+# in the repository's root
 git status                       # the port repo should be clean
 sh tools/export-patches.sh       # snapshot the current patched state
 git diff --stat patches/         # should be empty; if not, commit it first: that is your rollback point
@@ -65,7 +66,7 @@ audio, online/hubs, settings, skinning or Realm migrations.
 Check that the release is ahead of our current base. The base itself may be an untagged commit past an older release:
 
 ```sh
-git -C src/osu fetch https://github.com/ppy/osu.git tag "$T" --no-tags   # straight from GitHub, not via origin (~/osu)
+git -C src/osu fetch https://github.com/ppy/osu.git tag "$T" --no-tags   # straight from GitHub, not via origin
 git -C src/osu merge-base --is-ancestor HEAD "$T" && echo "ahead of our base: OK"
 git -C src/osu rev-list --count "$T"..HEAD      # 0 = we lose nothing; >0 = our base has commits the release lacks
 ```
@@ -124,18 +125,17 @@ If `stash pop` reports conflicts, the stash is **kept**. Resolve every file with
 
 Rules for resolving:
 
-- **Keep upstream's code and re-apply ours on top.** Every console change is inside `#if HBXL` / `#if HBXL_AUDIO`
+- **Keep upstream's code and re-apply ours on top.** Every console change is inside `#if OUNSU` / `#if OUNSU_AUDIO`
   blocks, so the `#else` branch should be upstream's *new* code, not the old code from our base.
-- **`osu.Framework.csproj`:** keep upstream's new package versions and our `HbxlBuild`/`HbxlAudio` property groups and
-  the FFmpeg.AutoGen 7.1.1 pin. The FFmpeg version has to match the static FFmpeg (`tools/build-ffmpeg.sh`).
+- **`osu.Framework.csproj`:** keep upstream's new package versions and our `OunsuBuild`/`OunsuAudio` property groups and
+  the FFmpeg.AutoGen 7.1.1 pin. The FFmpeg version has to match the static FFmpeg (`tools/build-native.sh ffmpeg`).
 - **PR #6002 (SDL3 audio)** isn't upstream yet. If upstream changed `AudioManager`, `Track`, `Sample`, `AudioThread` or
   `BassAudioManager`, check the PR on GitHub for a newer revision before merging by hand. If it has been merged
-  upstream, drop our copy and keep only the `#if HBXL` bits.
+  upstream, drop our copy and keep only the `#if OUNSU` bits.
 - **`ppy.osu.Framework.NativeLibs`** only carries BASS and the other desktop native libraries (we link BASS stubs), so a
   bump there doesn't matter. A bump of **`ppy.SDL3-CS`** does matter: the bindings must match the SDL3 we build
-  (`src/native/SDL`, a musl build reused from `~/osu-HBLauncher`). If its SDL version changes, the SDL build has to
-  follow. Claude must not edit SDL's sources (see CLAUDE.md), and our SDL patches would need re-applying to the new
-  version.
+  (`src/native/SDL`, unmodified). If its SDL version changes, move the checkout to the matching SDL release
+  (`patches/SDL.base`) and run `sh tools/build-native.sh sdl`. Claude must not edit SDL's sources (see CLAUDE.md).
 - **Veldrid** (`ppy.Veldrid`, `ppy.Veldrid.SPIRV`): a bump can change the shader compiler (`src/native/veldrid-spirv`,
   `src/veldrid-src`). Check the PR before assuming it's harmless.
 
@@ -143,7 +143,7 @@ Check that nothing was lost: every row of the tables in `patches/osu-framework.m
 
 ```sh
 git diff --stat "$F"            # compare with the file list in patches/osu-framework.md
-grep -rn '#if HBXL' --include=*.cs osu.Framework | wc -l   # compare with the old count (git stash show / the old diff)
+grep -rn '#if OUNSU' --include=*.cs osu.Framework | wc -l   # compare with the old count (git stash show / the old diff)
 cd ../..
 ```
 
@@ -160,21 +160,21 @@ Resolve conflicts the same way. Notes per file:
 
 - **`osu.Game/osu.Game.csproj`:** this one almost always conflicts. Upstream changes the `ppy.osu.Framework` version
   on the very line our patch **deletes**. Keep it deleted: osu.Game references `../../osu-framework` through the
-  `ProjectReference`. Keep upstream's other new versions (resources, Realm, ...) and our `HbxlBuild`/`HbxlDetachTest`
+  `ProjectReference`. Keep upstream's other new versions (resources, Realm, ...) and our `OunsuBuild`/`OunsuDetachTest`
   property groups.
 - **`Online/API/APIAccess.cs`:** only the metadata hub connector may be created. Spectator and multiplayer must stay null.
-- **`Online/HubClientConnector.cs`, `Online/HbxlMessagePackHubProtocol.cs`:** if the metadata hub gained new methods or
-  message types, add them to `HbxlHubTypes`. Check with `OSU_HBXL_HUB_SELFTEST=1` and `probes/hub-probe`.
+- **`Online/HubClientConnector.cs`, `Online/OunsuMessagePackHubProtocol.cs`:** if the metadata hub gained new methods or
+  message types, add them to `OunsuHubTypes`. Check with `OUNSU_HUB_SELFTEST=<file>` and `probes/hub-probe`.
 - **`Screens/Play/SubmittingPlayer.cs`:** keep "no submission token request" and the disabled playback-rate check.
-- **`Database/RealmObjectExtensions.cs` + `HbxlRealmCopier.cs`:** if upstream added fields to Realm models
+- **`Database/RealmObjectExtensions.cs` + `OunsuRealmCopier.cs`:** if upstream added fields to Realm models
   (`BeatmapInfo`, `BeatmapSetInfo`, `ScoreInfo`, `SkinInfo`, `RulesetInfo`, ...) or changed the AutoMapper config,
-  `HbxlRealmCopier` has to copy the new members too. Otherwise detached copies silently lose them. Diff the models:
+  `OunsuRealmCopier` has to copy the new members too. Otherwise detached copies silently lose them. Diff the models:
   `git diff HEAD@{1} HEAD -- osu.Game/Beatmaps/*Info.cs osu.Game/Scoring/ScoreInfo.cs osu.Game/Skinning/SkinInfo.cs`.
-  Then run the desktop test (`dotnet test -p:HbxlDetachTest=true`, see the HBLauncher CLAUDE.md).
-- **`OsuGameBase.cs`:** keep the `HbxlFileResourceStore` swap for the resources DLL.
+  Then check it in the desktop comparison build (step 5), which defines the same detach code (`OunsuDetachTest`).
+- **`OsuGameBase.cs`:** keep the `OunsuFileResourceStore` swap for the resources DLL.
 - Other files (`RollingCounter`, `BindableValueAccessor`, `SettingSourceAttribute`, `FrameStabilityContainer`,
   `ModelDownloader`, `ImportTask`, `WorkingBeatmapCache`, `SettingsOverlay`, the notifications connector): re-apply the
-  `#if HBXL` block onto upstream's new code.
+  `#if OUNSU` block onto upstream's new code.
 
 Then look for **new code NativeAOT can't run**. These are the usual causes of new crashes after an update:
 
@@ -199,8 +199,8 @@ elements, and the build would still embed the new resources (the substitutions f
 
 ```sh
 R=2026.1110.0                    # the new ppy.osu.Game.Resources version
-dotnet restore console/osu-game -p:HbxlBuild=true   # downloads the package into ~/.nuget/packages
-DLL=~/.nuget/packages/ppy.osu.game.resources/$R/lib/net8.0/osu.Game.Resources.dll   # check the lib/ folder name
+dotnet restore console/osu-game -p:OunsuBuild=true   # downloads the package into ~/.nuget/packages
+DLL=${NUGET_PACKAGES:-~/.nuget/packages}/ppy.osu.game.resources/$R/lib/net8.0/osu.Game.Resources.dll   # check the lib/ folder name
 dotnet run --project tools/resource-extract -c Release -- list "$DLL"     # optional: what's inside
 rm -rf fsroot/osu-resources.new
 dotnet run --project tools/resource-extract -c Release -- extract \
@@ -235,14 +235,17 @@ new version's JSON types. Then check `git diff console/osu-game/rd.xml`.
 
 Build errors to expect:
 
-- **`CS0246`/`CS0103` in `#if HBXL` code:** upstream renamed or moved something our patch uses. Fix the patch.
+- **`CS0246`/`CS0103` in `#if OUNSU` code:** upstream renamed or moved something our patch uses. Fix the patch.
 - **ILC warnings about new trimming problems:** a new reflection-heavy library may need a `TrimmerRootAssembly` in
   `console/osu-game/osu-game.csproj`. Look at how Newtonsoft.Json and Realm are rooted there.
 - **Island link errors (undefined symbols):** a new native dependency, or a newer runtime calling something the shims
   don't provide. `tools/unused-undef.py` helps sort out which symbols matter.
 
-Optional, and faster to debug: the desktop NativeAOT comparison build of the same sources (HBLauncher CLAUDE.md,
-"Current state"). Run it with a temporary `XDG_DATA_HOME` and a timeout, never against your real lazer data folder.
+Optional, and faster to debug: the desktop NativeAOT comparison build of the same sources. In `console/osu-game`:
+`dotnet publish -c Release -r linux-x64 -p:OunsuDetachTest=true -p:OunsuAudio=true -o obj/desktop-audio` (FFmpeg from
+`sh tools/build-native.sh ffmpeg-desktop`), then run `obj/desktop-audio/osu-game` with `DOTNET_DefaultStackSize=100000
+OSU_GRAPHICS_RENDERER=deferred OSU_GRAPHICS_SURFACE=Vulkan LD_LIBRARY_PATH=../../src/native/ffmpeg/build-desktop/lib`,
+a temporary `XDG_DATA_HOME` and a timeout, never against your real lazer data folder.
 
 ## 6. Test on the console
 

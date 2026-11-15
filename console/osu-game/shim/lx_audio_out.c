@@ -7,11 +7,10 @@
  * it to the host's audout queue (lx_audio_submit, lx/host/lx_audio.c). Only SDL's public API is used; SDL's own audio
  * driver stays "dummy" (romfs lx-env) and only serves as a fallback.
  *
- * Ported from HBLauncher's hbxl_audio_out.c (which drove nn::audio AudioOut at SDK offsets). Environment (lx-env;
- * osu!'s "Switch 2" settings override period and count through hbxl_audio_set_queue, which also reopens a running
- * output):
+ * Environment (lx-env; these are also the defaults of osu!'s "Switch 2" settings, which override period and count
+ * through ounsu_audio_set_queue, reopening a running output):
  *   LX_AUDIO_PERIOD=<frames>   frames per buffer, 16..1024 (default 128 = 2.7 ms)
- *   LX_AUDIO_BUFFERS=<n>       buffers queued, 1..16 (default 3)  -> latency ~ period x buffers (default 8 ms)
+ *   LX_AUDIO_BUFFERS=<n>       buffers queued, 1..16 (default 2)  -> latency ~ period x buffers (default 5.3 ms)
  *   LX_AUDIO_SDL=1             don't take over: SDL's own driver (dummy: silence)
  * A GC pause longer than the queue makes a short dropout (silence, no added latency); raise the period or count if
  * crackles bother you more than delay.
@@ -28,7 +27,7 @@
 
 #include <SDL3/SDL.h>
 
-extern void hbxl_log(const char *text); /* lx_osu.c */
+extern void ounsu_log(const char *text); /* lx_osu.c */
 int lx_audio_open(uint32_t period, uint32_t buffers); /* island runtime -> host */
 int lx_audio_submit(const void *pcm, uint32_t bytes);
 int lx_audio_queued(void);
@@ -44,7 +43,7 @@ SDL_AudioStream *__wrap_SDL_OpenAudioDeviceStream(SDL_AudioDeviceID devid, const
 bool __wrap_SDL_ResumeAudioStreamDevice(SDL_AudioStream *stream);
 bool __wrap_SDL_PauseAudioStreamDevice(SDL_AudioStream *stream);
 void __wrap_SDL_DestroyAudioStream(SDL_AudioStream *stream);
-int hbxl_audio_set_queue(int period, int buffers);
+int ounsu_audio_set_queue(int period, int buffers);
 
 #define OUT_RATE 48000
 #define OUT_FRAME_BYTES 4 /* s16 stereo */
@@ -59,7 +58,7 @@ static struct {
     atomic_bool run;     /* thread keeps going */
     atomic_bool playing; /* resumed by mysoundlib */
     int period, buffers;
-    int set_period, set_buffers; /* from hbxl_audio_set_queue (0: not set, use lx-env / defaults) */
+    int set_period, set_buffers; /* from ounsu_audio_set_queue (0: not set, use lx-env / defaults) */
     unsigned long underruns;
     unsigned long worst_gap_us;
 } g;
@@ -74,7 +73,7 @@ static void logf_(const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
-    hbxl_log(line);
+    ounsu_log(line);
 }
 
 static int env_int(const char *name, int def, int lo, int hi) {
@@ -174,7 +173,7 @@ static bool start_thread(void) {
  * remembered; on a running output it is closed and reopened with the new queue (a short gap), the SDL stream and
  * mysoundlib's callback stay. Returns the queue length in microseconds, 0 when our output isn't in use (yet).
  */
-int hbxl_audio_set_queue(int period, int buffers) {
+int ounsu_audio_set_queue(int period, int buffers) {
     int result = 0;
     period = period < 16 ? 16 : period > MAX_PERIOD ? MAX_PERIOD : period;
     buffers = buffers < 1 ? 1 : buffers > MAX_BUFFERS ? MAX_BUFFERS : buffers;
@@ -190,10 +189,10 @@ int hbxl_audio_set_queue(int period, int buffers) {
         if (!open_out()) {
             g.period = old_period;
             g.buffers = old_buffers;
-            if (!open_out()) hbxl_log("lx-audio: the output can't be reopened; no sound until osu! is restarted");
+            if (!open_out()) ounsu_log("lx-audio: the output can't be reopened; no sound until osu! is restarted");
         }
         if (g.out_open && !start_thread()) {
-            hbxl_log("lx-audio: can't restart the output thread; no sound until osu! is restarted");
+            ounsu_log("lx-audio: can't restart the output thread; no sound until osu! is restarted");
             close_out();
         }
         if (g.out_open)
@@ -209,12 +208,12 @@ static SDL_AudioStream *open_stream(SDL_AudioDeviceID devid, const SDL_AudioSpec
                                     void *userdata) {
     const char *e = getenv("LX_AUDIO_SDL");
     if ((e && *e == '1') || !spec || g.stream) {
-        hbxl_log("lx-audio: using SDL's own audio driver");
+        ounsu_log("lx-audio: using SDL's own audio driver");
         return __real_SDL_OpenAudioDeviceStream(devid, spec, callback, userdata);
     }
 
     g.period = g.set_period ? g.set_period : env_int("LX_AUDIO_PERIOD", 128, 16, MAX_PERIOD);
-    g.buffers = g.set_buffers ? g.set_buffers : env_int("LX_AUDIO_BUFFERS", 3, 1, MAX_BUFFERS);
+    g.buffers = g.set_buffers ? g.set_buffers : env_int("LX_AUDIO_BUFFERS", 2, 1, MAX_BUFFERS);
 
     const SDL_AudioSpec out = { SDL_AUDIO_S16LE, 2, OUT_RATE };
     SDL_AudioStream *stream = SDL_CreateAudioStream(spec, &out);
@@ -237,7 +236,7 @@ static SDL_AudioStream *open_stream(SDL_AudioDeviceID devid, const SDL_AudioSpec
     g.worst_gap_us = 0;
     atomic_store(&g.playing, false);
     if (!start_thread()) {
-        hbxl_log("lx-audio: can't start the output thread");
+        ounsu_log("lx-audio: can't start the output thread");
         close_out();
         g.stream = NULL;
         __real_SDL_DestroyAudioStream(stream);

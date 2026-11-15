@@ -1,7 +1,7 @@
 # Whitelist: only the port's own sources, docs, tools and patch snapshots are tracked.
-# Large or external things stay out: the toolchain (toolchain-src/), the osu!/framework/native
-# checkouts (src/, captured as patches/*.diff by tools/export-patches.sh), game data and logs
-# (fsroot/), the user's beatmaps (import-parked/), captures and build outputs.
+# Large or external things stay out: the musl toolchain (toolchain/, toolchain-src/), the osu!/framework/native
+# checkouts (src/, captured as patches/*.diff by tools/export-patches.sh), game data and logs (fsroot/, logs/),
+# release zips (dist/), captures and build outputs.
 /*
 !/.gitignore
 !/README.md
@@ -15,7 +15,6 @@
 !/probes/
 !/tools/
 !/patches/
-!/vk-include/
 
 # fsroot: game data, logs, resources and the private osu! session: never tracked
 !/fsroot/

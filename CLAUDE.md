@@ -4,7 +4,20 @@
 ppy's. The .nro is `ounsu.nro`, titled "ounsu!", with the user's own icon (`console/osu-game/icon.jpg`, made by
 the user; libounce's default until then); SD root `/switch/ounsu`. Never put osu! artwork in the .nro, and keep the "unofficial, not
 affiliated with ppy" note in the README. Use "osu!" only to say what this is a port of. Internal names
-(`console/osu-game`, `HBXL_*`, osu-game.csproj) stay.
+`console/osu-game` and osu-game.csproj stay.
+
+**HBXL → OUNSU (2026-11-15, pre-release sweep):** every `HBXL`/`Hbxl`/`hbxl` name is gone: defines `OUNSU`,
+`OUNSU_AUDIO/SETTINGS/HUBS/DETACH` (osu, framework), `OUNSU_NO_BASS/IN_PROCESS` (mysoundlib, now `src/mysoundlib/ounsu/
+mysoundlib-ounsu.csproj`), `OUNSU_ISLAND` (realm-core, set by `tools/musl-toolchain.cmake`); build properties
+`-p:OunsuBuild=true`, `OunsuAudio`, `OunsuDetachTest`; classes `OunsuNative`, `OunsuRealmCopier`,
+`OunsuFileResourceStore`, `OunsuMessagePackHubProtocol`/`OunsuHubTypes`; native glue `DirectPInvoke "ounsu"` with
+`ounsu_log`, `ounsu_vi_window`, `ounsu_display(_set)`, `ounsu_input_set_*`, `ounsu_audio_set_queue`, `ounsu_gc_log_set`;
+env vars `OUNSU_JSON_SELFTEST`, `OUNSU_HUB_SELFTEST/LIVETEST`, `OUNSU_HUBS`, `OUNSU_SUBMIT`, `OUNSU_IMPORT_DIR`, and the
+shims' `LX_AUDIO_PERIOD/BUFFERS`, `LX_GC_LOG` (the settings used to read `HBXL_*` names here while the shims read
+`LX_*`). Only `__hbx_syscall` remains: it's baked into the musl toolchain (`patches/musl-hbx-syscall-hooks.diff`).
+Removed in the same sweep: Program.cs's GC watch, stall/screen-load detector, periodic screenshots, test hooks and
+exit timer; the `OUNSU_NO_AUDIO` silent track; `probes/usb-probe` (findings in FEASIBILITY.md); `vk-include/` (OunceVK's
+headers in `$DEVKITPRO/portlibs/switch2/include` serve the musl compiler too).
 
 **Releases (2026-11-15):** licence MIT (`LICENSE`, copyright NoelleTGS, plus HBLauncher's MIT notice for `lx/host`).
 Versions use osu!'s scheme: build.sh stamps `yyyy.Mdd.N` from the build date (`OUNSU_VERSION` overrides; N counts
@@ -54,7 +67,7 @@ default**; nxlink is only a development log channel. Never design features aroun
     suppressed; a thread that never reaches a safepoint stalls the GC, as on hbxl), real memory use of the GC range.
   - **Phase 3 in progress.** Done 2026-11-13: Vulkan from the island (Test 3, 60 fps), Veldrid on OunceVK (Test 4, all
     stages; window fixed at 1920x1080 because swapchain recreation fails on the console's window), networking
-    (Test 5, 13/13: sockets, epoll, DNS, OpenSSL TLS). SDL decision: the hbxl SDL3 stays in the island (host-side SDL
+    (Test 5, 13/13: sockets, epoll, DNS, OpenSSL TLS). SDL decision: SDL3 stays in the island (host-side SDL
     would call managed code from non-island threads).
   - **Phase 4 in progress (2026-11-14): osu! renders and takes input** (runs 5-10, FEASIBILITY.md 2026-11-14): Realm
     opens, first-run setup and main menu on screen at 60 fps, and every input works (pad, touch, gyro, USB keyboard/
@@ -86,8 +99,11 @@ default**; nxlink is only a development log channel. Never design features aroun
     a crash shows no `lx: program exited` line. `LX_LOG_FILE=/lx-last.log` in lx-env copies the log to the card
     (for undocked runs). The ShadowCast shows black at 1440p/120 Hz: set the docked resolution to 1080p and 60 fps to capture. `LX_TRACE=1` in `sdmc:/switch/ounsu/lx-env` (or the romfs lx-env, via
     `LX_ENV_EXTRA="LX_TRACE=1"` on build.sh) logs every syscall. Files onto the card:
-    `tools/ftp-upload.py` with ounceshell's FTP server. The native libraries come from `~/osu-HBLauncher/src/native`
-    (musl builds, `LX_NATIVE_BUILDS`), except OpenSSL and FFmpeg (this repo's src/native). On the card:
+    `tools/ftp-upload.py` with ounceshell's FTP server. The native libraries are built in this repo by
+    `tools/build-native.sh` into `src/native/*/build-lx` (OpenSSL in its tree); the musl toolchain is `toolchain/`
+    (here a symlink to `~/osu-HBLauncher/toolchain-src/toolchain`; recipe in `patches/musl.md`). Sources:
+    `tools/fetch-sources.sh`. SDL is **unmodified** since 2026-11-15 (the HBLauncher hbx patch is in
+    `git -C src/native/SDL stash list`); its build config matches the old one exactly. On the card:
     `/switch/ounsu/osu-resources` (uploaded 2026-11-14), osu! data in `/switch/ounsu/home/.local/share/osu` (fresh).
     Phase 4: osu-game nro + SD layout + clean exit. Phase 5 (faults →
     managed exceptions) is parked: the loader never gets the exceptions.
@@ -149,15 +165,15 @@ NativeAOT). The nn::hid / six-axis / keyboard **SDK offsets** were for SmileBASI
 
 ### Findings that DO carry over (platform-independent; details in the old CLAUDE.md)
 
-- **Patched sources** (`src/`) and everything managed: osu-framework `#if HBXL` patches (windowed only, renderer
-  order, PR #6002 audio via SDL3 + mysoundlib + FFmpeg), osu `HBXL_*` defines (settings section, hubs, notification
+- **Patched sources** (`src/`) and everything managed: osu-framework `#if OUNSU` patches (windowed only, renderer
+  order, PR #6002 audio via SDL3 + mysoundlib + FFmpeg), osu `OUNSU_*` defines (settings section, hubs, notification
   connector null fix, build-date assembly versions).
-- **Build gotchas:** `-p:HbxlBuild=true` must be on the dotnet command line (a global property), otherwise the framework
+- **Build gotchas:** `-p:OunsuBuild=true` must be on the dotnet command line (a global property), otherwise the framework
   patches silently vanish. osu-game's assembly version must stay **0.0.0** (the .nro's own version, author and icon are set in `console/osu-game/build.sh`; the version is stamped from the build date) (1.0.0 = "deployed" build: legacy score
   JSON, Sentry reports to ppy). Linking real `-lstdc++` needs NativeAOT's `libstdc++compat.a` dropped.
-- **NativeAOT + JSON:** `rd.xml` from `tools/gen-rdxml` (build.sh regenerates it); `OSU_HBXL_JSON_SELFTEST=1`.
-- **Metadata hub:** `HbxlMessagePackHubProtocol` + `HbxlHubTypes` (stock SignalR protocol needs expression trees);
-  self-tests `OSU_HBXL_HUB_SELFTEST`, `probes/hub-probe`. Only the metadata hub; spectator/multiplayer are never contacted.
+- **NativeAOT + JSON:** `rd.xml` from `tools/gen-rdxml` (build.sh regenerates it); `OUNSU_JSON_SELFTEST=1`.
+- **Metadata hub:** `OunsuMessagePackHubProtocol` + `OunsuHubTypes` (stock SignalR protocol needs expression trees);
+  self-tests `OUNSU_HUB_SELFTEST`, `probes/hub-probe`. Only the metadata hub; spectator/multiplayer are never contacted.
 - **GC:** HeapHardLimit well below GCRegionRange (hbxl: 640 MiB / 1 GiB; kaiHEN: 3 / 4 GiB); no GCConserveMemory; never allocate >85 KB arrays per
   audio track (LOH fragmentation; songs are decoded into 64 KiB segments).
 - **Never put a repeating task on the game's scheduler** (`Scheduler.AddDelayed(..., repeat: true)`): "Too many timed
@@ -190,13 +206,12 @@ are tracked.
 | Path | What |
 |---|---|
 | `console/osu-game` | The osu! app: `Program.cs`, `ConsoleOsuGame`, `Switch2Settings.cs`, `GameplayGcSession.cs`, `HubSelfTest.cs`, `rd.xml`, `build.sh` and `shim/` (island-side C: `lx_input.c`, `lx_audio_out.c`, `lx_gc.c`, `lx_osu.c` (the `hbx*` symbols osu-framework and the reused SDL3 still look for), BASS stubs). |
-| `probes/` | One bring-up probe per step, each a kaiHEN .nro: hello-island, aot-hello, vk-island, gfx-probe, net-probe (hub-probe runs on the PC). aot-hello's `tools/capture-link.sh` is what osu-game's build uses to capture the link line. |
+| `probes/` | One bring-up probe per step, each a kaiHEN .nro: hello-island, aot-hello, vk-island, gfx-probe, net-probe (hub-probe runs on the PC). |
 | `src/osu-framework`, `src/osu`, `src/mysoundlib` | Patched checkouts, copied **with their uncommitted changes** (git working trees; `patches/*.diff` snapshot them via `tools/export-patches.sh`). Build outputs (bin/obj) weren't copied. |
-| `src/native/{SDL,ffmpeg,veldrid-spirv,realm-dotnet,openssl,sqlite-dl}`, `src/veldrid-src` | Native sources with the hbxl patches; the `build-hbx/` and `build-desktop/` outputs weren't copied (they still exist in `~/osu-HBLauncher/src/native/*`). Under the musl-island plan they stay **musl builds** (not devkitA64): reuse or rebuild them with the musl toolchain. |
-| `patches/` | Diff + base commit + notes per external checkout (SDL, osu, osu-framework, ffmpeg, openssl, realm-dotnet, mysoundlib, veldrid-spirv). The hbxl runtime diff is `~/osu-HBLauncher/patches/HBLauncher.diff` (applied in `~/HBLauncher`). |
-| `tools/` | resource-extract (osu-resources → loose files), gen-rdxml, build-ffmpeg.sh, export-patches.sh, net-probe-server.py. |
+| `src/native/{SDL,ffmpeg,veldrid-spirv,realm-dotnet,openssl,sqlite-dl}` | Native sources (patches in `patches/`), built as **musl** static libraries by `tools/build-native.sh` into `build-lx/`. `src/veldrid-src` is an unused leftover copy. |
+| `patches/` | Diff + base commit + notes per external checkout (SDL and ffmpeg unmodified, osu, osu-framework, openssl, realm-dotnet, mysoundlib, veldrid-spirv), `sqlite.md`, and the musl toolchain recipe + syscall-hook patch (`musl.md`). |
+| `tools/` | fetch-sources.sh, build-native.sh + musl-toolchain.cmake, the island link (aot-island.py, make-island.sh, capture-link.sh, gen-ssl-syms.py, gen-vk-tramp.py, svc-scan.py, unused-undef.py, scrub-paths.py), resource-extract, gen-rdxml, export-patches.sh, release.sh + gen-notices.py, ftp-upload.py, net-probe-server.py. |
 | `fsroot/` | Copied game data, a starting point for the SD card layout: `osu-resources/` (extracted resources), `usr/local/ssl/cert.pem` (CA bundle), `home/.local/share/osu` (the console's osu! data folder: realm, beatmaps, settings, **a logged-in session**; treat it as the user's private data). Nothing in it is tracked. |
-| `vk-include/` | Vulkan headers used with Arch's cross gcc (OunceVK installs its own). |
 
 Not copied (still in `~/osu-HBLauncher`): `toolchain-src/` (musl GCC, 3.2 GB), build outputs (`console/osu-game/{bin,obj,app/build}`,
 probe builds), `captures/`, logs (`fsroot/last-run.log`, `udp-diag.log`), `fsroot/{tmp,import}`, `import-backup/`.

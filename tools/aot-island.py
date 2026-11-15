@@ -3,7 +3,7 @@
 
     python3 tools/aot-island.py CAPTURE PROJECT_DIR OUT.o [EXTRA_INPUT...] [--exclude NAME]... [--vulkan]
 
-CAPTURE is the argument list probes/aot-hello/tools/capture-link.sh recorded (one per line); relative paths in it are
+CAPTURE is the argument list tools/capture-link.sh recorded (one per line); relative paths in it are
 relative to PROJECT_DIR (where dotnet publish ran). Keeps the ILC object and the runtime's archives, drops the
 clang/glibc flags, adds lx/dotnet (delegate thunks, pthread_kill, mlock) with its --wrap flags, and runs
 tools/make-island.sh. EXTRA_INPUTs (objects, archives, C/asm sources, linker flags) go after the captured inputs;
@@ -13,7 +13,7 @@ tools/gen-vk-tramp.py generates (Veldrid's Vulkan bindings; the host must be bui
 
 The runtime archive libRuntime.*.a is copied with __security_cookie moved from .rodata to writable data: start-up
 mprotects the cookie's page writable to store a random value, and the .nro's read-only data can't be made writable
-(mprotect is a no-op here). This is the HBLauncher fix, unchanged.
+(mprotect is a no-op here).
 """
 import os
 import shutil
@@ -23,7 +23,9 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TC = Path(os.environ.get("LX_MUSL_TOOLCHAIN", Path.home() / "osu-HBLauncher/toolchain-src/toolchain")) / "bin"
+TC = Path(os.environ.get("LX_MUSL_TOOLCHAIN", ROOT / "toolchain")) / "bin"
+# OunceVK's Vulkan headers (the folder holds only Vulkan/GL headers, so the musl compiler can use it).
+VK_INCLUDE = Path(os.environ.get("DEVKITPRO", "/opt/devkitpro")) / "portlibs/switch2/include"
 TOOL = lambda name: str(TC / f"aarch64-linux-musl-{name}")
 
 WRAPS = ["RhAllocateThunksMapping", "RhpGetThunkDataBlockAddress", "RhpGetThunkStubsBlockAddress"]
@@ -91,11 +93,10 @@ def main() -> None:
         runtime = [compile_source(ROOT / "lx/dotnet/lx_dotnet.c", work),
                    compile_source(ROOT / "lx/dotnet/lx_thunks.S", work)]
         if vulkan:
-            vk_include = ROOT / "vk-include"
             gen = work / "vk"
             subprocess.run([sys.executable, str(ROOT / "tools/gen-vk-tramp.py"),
-                            str(vk_include / "vulkan/vulkan_core.h"), str(gen)], check=True)
-            runtime += [compile_source(ROOT / "lx/dotnet/lx_vk.c", work, [f"-I{vk_include}"]),
+                            str(VK_INCLUDE / "vulkan/vulkan_core.h"), str(gen)], check=True)
+            runtime += [compile_source(ROOT / "lx/dotnet/lx_vk.c", work, [f"-I{VK_INCLUDE}"]),
                         compile_source(gen / "vk_tramp.S", work),
                         compile_source(gen / "vk_names.c", work, ["-Wno-error"])]
         # -I... extras are include paths for the extra C sources, everything else goes to the link.

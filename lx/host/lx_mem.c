@@ -1,12 +1,12 @@
 /*
  * mmap and friends for the island, from the newlib heap.
  *
- * Phase 1: anonymous mappings only, each one an aligned heap block. What the HBLauncher runtime learned (memory.c and
- * its local changes) and the GC will need later:
+ * Anonymous mappings only (file mappings are lx_fd.c's), each one an aligned heap block:
  * - MAP_FIXED anonymous over memory we own = zero-fill and succeed: the .NET GC decommits that way and expects the
- *   pages to read as zero when it re-commits them (done here).
- * - madvise(DONTNEED) must zero too (done here).
- * - The GC reserves its whole region range up front (1 GiB); that is real memory here, as on hbxl. Phase 2.
+ *   pages to read as zero when it re-commits them.
+ * - madvise(DONTNEED) zeroes too.
+ * - The GC reserves its whole region range up front (System.GC.RegionRange); the heap commits memory when it is
+ *   touched, so only what the GC uses costs real memory.
  * - Partial munmap of a block can't give memory back: the range is zeroed and the block stays until all of it is
  *   unmapped.
  */
