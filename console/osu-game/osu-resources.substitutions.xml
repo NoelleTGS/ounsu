@@ -936,6 +936,7 @@
     <resource name="osu.Game.Resources.Textures.Gameplay.taiko.taiko-drum-outer.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Headers.news.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.add.png" action="remove" />
+    <resource name="osu.Game.Resources.Textures.Icons.arrow-cycle.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.audio.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.beatmap.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.BeatmapDetails.accuracy.png" action="remove" />
@@ -1004,6 +1005,7 @@
     <resource name="osu.Game.Resources.Textures.Icons.expand-b.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.featured-artist-a.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.featured-artist-circle.png" action="remove" />
+    <resource name="osu.Game.Resources.Textures.Icons.folder.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.gameplay-a.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.gameplay-b.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.gameplay-c.png" action="remove" />
@@ -1012,6 +1014,7 @@
     <resource name="osu.Game.Resources.Textures.Icons.hare.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.heart.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.home.png" action="remove" />
+    <resource name="osu.Game.Resources.Textures.Icons.information.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.input.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.LeftCircle.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.Logo.png" action="remove" />
@@ -1103,6 +1106,7 @@
     <resource name="osu.Game.Resources.Textures.Icons.Ranking.perfect-sparkle.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.Ranking.perfect-star.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.Ranking.perfect-text.png" action="remove" />
+    <resource name="osu.Game.Resources.Textures.Icons.reel.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.remove.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.RightCircle.png" action="remove" />
     <resource name="osu.Game.Resources.Textures.Icons.RulesetCatch.png" action="remove" />
@@ -1552,7 +1556,6 @@
     <resource name="osu.Game.Resources.Samples.Multiplayer.Matchmaking.Ranked.final-result-lose.ogg" action="remove" />
     <resource name="osu.Game.Resources.Samples.Multiplayer.Matchmaking.Ranked.final-result-win.ogg" action="remove" />
     <resource name="osu.Game.Resources.Tracks.rankedplay_bgm.ogg" action="remove" />
-    <resource name="osu.Game.Resources.Skins.Retro.skin.ini" action="remove" />
     <resource name="osu.Game.Resources.Shaders.sh_ArgonBarPath.fs" action="remove" />
     <resource name="osu.Game.Resources.Shaders.sh_ArgonBarPathBackground.fs" action="remove" />
     <resource name="osu.Game.Resources.Shaders.sh_CircularFlashlight.fs" action="remove" />

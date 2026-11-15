@@ -400,3 +400,24 @@ Tablet: Wacom CTL-671 (056a:0301) with a custom high-polling-rate firmware. Open
   timer (HBLauncher-era diagnostics); the silent stopwatch track for maps (`OUNSU_NO_AUDIO`, from before audio worked);
   `probes/usb-probe` (the findings are above); `vk-include/` (symlinks into `/usr/include`; the musl compiler now uses
   OunceVK's headers, which match the driver).
+
+## 2026-11-15: osu! 2026.1115.0-lazer (first update by UPDATING.md)
+
+- **Versions.** osu! `28283cdbfd` (2026.1026.0 + 32) → tag `2026.1115.0-lazer` (32 commits), osu-framework
+  `2026.1030.0` → `2026.1114.0` (10 commits), resources `2026.1021.0` → `2026.1112.1`. Realm, SignalR, MessagePack,
+  Newtonsoft unchanged; `ppy.osu.Framework.NativeLibs` bumped (BASS only, stubbed here); no SDL3-CS or Veldrid bump.
+- **Merge.** Framework: no conflicts (upstream's `AudioThread` WASAPI-recovery change calls `AudioManager.UpdateDevice`,
+  which PR #6002's abstract `AudioManager` still inherits from `AudioCollectionManager`). osu!: only the expected
+  `osu.Game.csproj` conflict (framework PackageReference stays deleted). `APIAccess.cs` and `SubmittingPlayer.cs`
+  merged on their own (upstream: localisation only). File lists and `#if OUNSU` counts (25 / 33) unchanged; the patch
+  diffs differ only in offsets. No new AOT-risky calls, no Realm model/schema changes (realm stays at version 52), no
+  metadata hub changes; the new `MatchmakingUserStats` is a local model of the matchmaking screen.
+- **Resources.** Four new icons; `Skins/Retro/skin.ini` removed upstream. The card's folder was deleted and uploaded
+  fresh. `rd.xml` came out unchanged from the second build.
+- **GitHub's release notes** list everything since the previous *Latest* release (2026.1005.0-lazer), most of which our
+  old base already had: judge an update by `git log OLD..TAG`, not by the notes.
+- **Console (run update-run1):** starts, realm opens with no migration, maps in several rulesets at 120 fps, results
+  screen, online login, chat, beatmap lookups; the user saw no problems. Only oddity in the log: `GET
+  /api/v2/notifications` answered HTTP 500 `{"error":null}` on every attempt (it worked under HBLauncher), so the
+  notification websocket kept retrying with upstream's backoff. Nothing in this update changes that request; the user
+  saw no visible effect. Watch it on the next runs.

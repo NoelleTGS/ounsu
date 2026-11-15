@@ -302,10 +302,10 @@ index ac276450d5..a3472491e7 100644
          /// Creates the text. Delegates to <see cref="CreateSpriteText"/> by default.
          /// </summary>
 diff --git a/osu.Game/Online/API/APIAccess.cs b/osu.Game/Online/API/APIAccess.cs
-index c099474341..127597d0e9 100644
+index 1d9f07617e..690d542ede 100644
 --- a/osu.Game/Online/API/APIAccess.cs
 +++ b/osu.Game/Online/API/APIAccess.cs
-@@ -492,8 +492,19 @@ public void AuthenticateSecondFactor(string code)
+@@ -493,8 +493,19 @@ public void AuthenticateSecondFactor(string code)
              SecondFactorCode = code;
          }
  
@@ -710,10 +710,10 @@ index 990c1c839b..fb98fa5c3f 100644
              // This is a hotfix for ongoing bass issues we are trying to resolve (see https://www.un4seen.com/forum/?topic=20482.msg145474#msg145474)
              //
 diff --git a/osu.Game/Screens/Play/SubmittingPlayer.cs b/osu.Game/Screens/Play/SubmittingPlayer.cs
-index 3d201b26d3..0a690a3bb4 100644
+index 72c6b8e39f..5fb22b10f4 100644
 --- a/osu.Game/Screens/Play/SubmittingPlayer.cs
 +++ b/osu.Game/Screens/Play/SubmittingPlayer.cs
-@@ -86,7 +86,12 @@ private void load()
+@@ -88,7 +88,12 @@ private void load()
  
          protected override GameplayClockContainer CreateGameplayClockContainer(WorkingBeatmap beatmap, double gameplayStart) => new MasterGameplayClockContainer(beatmap, gameplayStart)
          {
@@ -726,7 +726,7 @@ index 3d201b26d3..0a690a3bb4 100644
          };
  
          protected override void LoadAsyncComplete()
-@@ -112,6 +117,17 @@ private bool handleTokenRetrieval()
+@@ -114,6 +119,17 @@ private bool handleTokenRetrieval()
                  return false;
              }
  
@@ -776,7 +776,7 @@ index a4cd356339..76efd565f1 100644
              if (bindableWithValueType == null)
                  return;
 diff --git a/osu.Game/osu.Game.csproj b/osu.Game/osu.Game.csproj
-index caaaf54c46..9724e108e3 100644
+index c8bb583280..4d6ba122d4 100644
 --- a/osu.Game/osu.Game.csproj
 +++ b/osu.Game/osu.Game.csproj
 @@ -17,6 +17,18 @@
@@ -802,8 +802,8 @@ index caaaf54c46..9724e108e3 100644
        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
      </PackageReference>
      <PackageReference Include="Realm" Version="20.1.0"/>
--    <PackageReference Include="ppy.osu.Framework" Version="2026.1030.0"/>
-     <PackageReference Include="ppy.osu.Game.Resources" Version="2026.1021.0"/>
+-    <PackageReference Include="ppy.osu.Framework" Version="2026.1114.0"/>
+     <PackageReference Include="ppy.osu.Game.Resources" Version="2026.1112.1"/>
      <PackageReference Include="Sentry" Version="6.11.0"/>
      <PackageReference Include="SharpCompress" Version="0.50.4"/>
 diff --git a/Directory.Build.targets b/Directory.Build.targets

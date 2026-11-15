@@ -5153,7 +5153,7 @@ index fda59d2d0..c5bd766fd 100644
              foreach (string path in paths.Split(':'))
              {
 diff --git a/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs b/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs
-index b615f92b6..498ae1ed5 100644
+index aad7ad28a..f88a6be27 100644
 --- a/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs
 +++ b/osu.Framework/Platform/SDL3/SDL3Window.Windowing.cs
 @@ -62,6 +62,16 @@ private unsafe void setupWindowing(FrameworkConfigManager config)
@@ -5262,7 +5262,7 @@ index b615f92b6..498ae1ed5 100644
              }
          }
  
-@@ -764,6 +840,10 @@ private static unsafe bool tryFetchDisplayMode(SDL_Window* windowHandle, WindowS
+@@ -779,6 +855,10 @@ private static unsafe bool tryFetchDisplayMode(SDL_Window* windowHandle, WindowS
              if (mode != null)
              {
                  displayMode = mode->ToDisplayMode(display.Index);
@@ -5274,7 +5274,7 @@ index b615f92b6..498ae1ed5 100644
                  return true;
              }
 diff --git a/osu.Framework/Platform/SDL3/SDL3Window.cs b/osu.Framework/Platform/SDL3/SDL3Window.cs
-index 43af122d1..3642b577a 100644
+index 9da969020..c080a10c3 100644
 --- a/osu.Framework/Platform/SDL3/SDL3Window.cs
 +++ b/osu.Framework/Platform/SDL3/SDL3Window.cs
 @@ -94,6 +94,12 @@ public IntPtr WindowHandle
@@ -5340,7 +5340,7 @@ index 43af122d1..3642b577a 100644
                  pollMouse();
  
 diff --git a/osu.Framework/Threading/AudioThread.cs b/osu.Framework/Threading/AudioThread.cs
-index 7b7ca5c41..43ba6b243 100644
+index abf633352..c7ac8dcfa 100644
 --- a/osu.Framework/Threading/AudioThread.cs
 +++ b/osu.Framework/Threading/AudioThread.cs
 @@ -78,7 +78,8 @@ internal void RegisterManager(AudioManager manager)
@@ -5363,7 +5363,7 @@ index 7b7ca5c41..43ba6b243 100644
          }
  
          protected override void OnExit()
-@@ -175,11 +177,18 @@ internal void FreeDevice(int deviceId)
+@@ -176,11 +178,18 @@ internal void FreeDevice(int deviceId)
          /// </summary>
          internal static void PreloadBass()
          {
@@ -5405,7 +5405,7 @@ index 4be49407e..c3d5baa27 100644
              double before = CurrentTime;
  
 diff --git a/osu.Framework/osu.Framework.csproj b/osu.Framework/osu.Framework.csproj
-index 74d803315..76fa4ef85 100644
+index 37847db22..4970fd975 100644
 --- a/osu.Framework/osu.Framework.csproj
 +++ b/osu.Framework/osu.Framework.csproj
 @@ -11,7 +11,20 @@
