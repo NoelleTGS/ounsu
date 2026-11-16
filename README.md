@@ -14,8 +14,6 @@ osu! and osu-framework are compiled ahead of time with .NET NativeAOT. All of th
 
 ## Status
 
-The game runs and plays on kaiHEN: started from hbmenu, entirely from the console and its SD card, and back to hbmenu when you quit.
-
 Currently working:
   - All main gameplay features and screens like main menu, song select, gameplay, and results
   - Various control schemes (controller, touchscreen, gyro, USB keyboard and mouse, **and Joy-Con 2 mouse mode**)
@@ -25,9 +23,10 @@ Currently working:
     - Note: as this is a custom build of the game and does not include the game's anti-cheat, score submission, multiplayer, spectating, and online status are all (and will always be) completely disabled
   - No garbage collections during gameplay to ensure best performance. There are still pauses of 100 to 500 ms outside gameplay (song select, map loading, leaving a map)
   - A "Switch 2" section in osu!'s settings
+  - Exiting game returns to hbmenu
 
 Not working yet:
-  - Drawing tablets aren't supported, not sure if they ever will be
+  - Drawing tablets aren't supported, and cannot be with the current exploits we have ([source from r/switch2hacks Discord](https://discord.com/channels/1358947330115502186/1358948865469976596/1571770606716846183))
 
 The progress log is in `FEASIBILITY.md` and the hardware tests are in `TESTING.md`. Moving to a newer osu! release: `UPDATING.md`.
 
