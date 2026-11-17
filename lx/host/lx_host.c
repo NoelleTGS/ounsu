@@ -124,6 +124,7 @@ static char **build_env(int romfs) {
     env_add("HOME=/home");
     env_add("PWD=/");
     env_add("LANG=C.UTF-8");
+    env_add("XDG_DATA_HOME=/");
     g_env[g_nenv] = NULL;
     return g_env;
 }

@@ -107,7 +107,7 @@ default**; nxlink is only a development log channel. Never design features aroun
     (here a symlink to `~/osu-HBLauncher/toolchain-src/toolchain`; recipe in `patches/musl.md`). Sources:
     `tools/fetch-sources.sh`. SDL is **unmodified** since 2026-11-15 (the HBLauncher hbx patch is in
     `git -C src/native/SDL stash list`); its build config matches the old one exactly. On the card:
-    `/switch/ounsu/osu-resources` (uploaded 2026-11-14), osu! data in `/switch/ounsu/home/.local/share/osu` (fresh).
+    `/switch/ounsu/osu-resources` (uploaded 2026-11-14), osu! data in `/switch/ounsu/osu` (fresh).
     Phase 4: osu-game nro + SD layout + clean exit. Phase 5 (faults →
     managed exceptions) is parked: the loader never gets the exceptions.
 - HBLauncher-only material was left out of this repo on 2026-11-13: bti-probe, vfs-hosttest, the net host tests, the
@@ -214,7 +214,7 @@ are tracked.
 | `src/native/{SDL,ffmpeg,veldrid-spirv,realm-dotnet,openssl,sqlite-dl}` | Native sources (patches in `patches/`), built as **musl** static libraries by `tools/build-native.sh` into `build-lx/`. `src/veldrid-src` is an unused leftover copy. |
 | `patches/` | Diff + base commit + notes per external checkout (SDL and ffmpeg unmodified, osu, osu-framework, openssl, realm-dotnet, mysoundlib, veldrid-spirv), `sqlite.md`, and the musl toolchain recipe + syscall-hook patch (`musl.md`). |
 | `tools/` | fetch-sources.sh, build-native.sh + musl-toolchain.cmake, the island link (aot-island.py, make-island.sh, capture-link.sh, gen-ssl-syms.py, gen-vk-tramp.py, svc-scan.py, unused-undef.py, scrub-paths.py), resource-extract, gen-rdxml, export-patches.sh, release.sh + gen-notices.py, ftp-upload.py, net-probe-server.py. |
-| `fsroot/` | Copied game data, a starting point for the SD card layout: `osu-resources/` (extracted resources), `usr/local/ssl/cert.pem` (CA bundle), `home/.local/share/osu` (the console's osu! data folder: realm, beatmaps, settings, **a logged-in session**; treat it as the user's private data). Nothing in it is tracked. |
+| `fsroot/` | Copied game data, a starting point for the SD card layout: `osu-resources/` (extracted resources), `usr/local/ssl/cert.pem` (CA bundle), `osu` (the console's osu! data folder: realm, beatmaps, settings, **a logged-in session**; treat it as the user's private data). Nothing in it is tracked. |
 
 Not copied (still in `~/osu-HBLauncher`): `toolchain-src/` (musl GCC, 3.2 GB), build outputs (`console/osu-game/{bin,obj,app/build}`,
 probe builds), `captures/`, logs (`fsroot/last-run.log`, `udp-diag.log`), `fsroot/{tmp,import}`, `import-backup/`.

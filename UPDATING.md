@@ -253,7 +253,7 @@ Send the build with nxlink and keep the log (see TESTING.md and CLAUDE.md, "Work
 
 - [ ] Starts, main menu at full frame rate, no new errors in the log (`grep -iE 'exception|error|fail'`).
 - [ ] **Realm migration:** a new version may bump the schema. Start with the existing data folder on the card (back up
-      `/switch/ounsu/home/.local/share/osu` first) and check that beatmaps, scores and skins are still there.
+      `/switch/ounsu/osu` first) and check that beatmaps, scores and skins are still there.
 - [ ] Song select, a full map in each ruleset, results screen, replay.
 - [ ] Audio: music, hitsounds, no crackles; seeking in song select.
 - [ ] Skins: default skins load, and a saved skin layout still applies (that depends on the version stamp).

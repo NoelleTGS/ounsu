@@ -9,7 +9,7 @@ using osu.Game;
 
 // ounsu!: osu! (lazer) on Switch 2 (kaiHEN homebrew, Linux syscalls emulated by the host .nro), cut-down entry point.
 // No Velopack/Discord/IPC/tournament (osu.Desktop's extras). Logs go through ounsu_log (the host's log: nxlink, and the
-// SD card with LX_LOG_FILE), and osu!'s own logs land on the SD card under the data root's /home/.local/share/osu/logs.
+// SD card with LX_LOG_FILE), and osu!'s own logs land on the SD card under the data root's /osu/logs.
 static partial class Program
 {
 #if OUNSU

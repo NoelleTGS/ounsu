@@ -38,7 +38,7 @@ You need a Switch 2 running [kaiHEN](https://github.com/ouncebrew/kaihen): follo
 
 1. Download `ounsu-<version>.zip` from the [latest release](../../releases/latest). It holds the game (`switch/ounsu.nro`) and osu!'s resources (`switch/ounsu/osu-resources/`).
 2. Extract it to the root of your SD card, merging its `switch` folder with the one already there. You can put the card in your PC, or use ounceshell's FTP server.
-3. Start hbmenu and choose **ounsu!**. The first start shows osu!'s first-run setup; your data (database, beatmaps, skins, settings) is created in `/switch/ounsu/home/.local/share/osu/`.
+3. Start hbmenu and choose **ounsu!**. The first start shows osu!'s first-run setup; your data (database, beatmaps, skins, settings) is created in `/switch/ounsu/osu/`.
 
 To update, delete `/switch/ounsu/osu-resources/`, then extract the new zip the same way. Your osu! data isn't touched.
 
@@ -81,7 +81,7 @@ For development, hbmenu's netloader (press **Y**) and `nxlink -s -a <console IP>
 |---|---|
 | `/switch/ounsu.nro` | The game |
 | `/switch/ounsu/osu-resources/` | osu!'s resources (from the release zip, or extracted with `tools/resource-extract`) |
-| `/switch/ounsu/home/.local/share/osu/` | osu!'s data folder (created on first start: database, beatmaps, skins, settings) |
+| `/switch/ounsu/osu/` | osu!'s data folder (created on first start: database, beatmaps, skins, settings) |
 | `/switch/ounsu/import/` | Drop beatmaps, skins and replays here to import them (see below) |
 | `/switch/ounsu/lx-env` | Optional: extra environment variables, one `KEY=VALUE` per line. `LX_LOG_FILE=/lx-last.log` keeps a copy of the log on the card |
 
