@@ -1,6 +1,6 @@
 # ounsu!
 
-**ounsu!** is an experimental, **unofficial** port of [osu! lazer](https://github.com/ppy/osu) (C#/.NET) to a jailbroken Switch 2, as a homebrew `.nro` under [kaiHEN](https://github.com/ouncebrew/kaihen). It starts from hbmenu and runs natively on the console from its SD card.
+**ounsu!** is an experimental, **unofficial** port of [osu! lazer](https://github.com/ppy/osu) to a jailbroken Switch 2, as a homebrew `.nro` under [kaiHEN](https://github.com/ouncebrew/kaihen). It starts from hbmenu and runs natively on the console from its SD card.
 
 > [!IMPORTANT]
 > ounsu! is an unofficial fan project. It is not affiliated with or endorsed by peppy, ppy Pty Ltd, or anyone on the osu! team. "osu!" and "ppy" are ppy's trademarks. Do not report ounsu! problems to ppy. You can support the official osu! project at https://osu.ppy.sh/home/support.
@@ -10,25 +10,23 @@
 >
 > No attempt is made to circumvent anti-cheat and/or enable features like score submission and multiplayer. No online function that ounsu! has is anything beyond what compiling the game in release mode on PC allows.
 
-osu! and osu-framework are compiled ahead of time with .NET NativeAOT. All of the game's code is linked into one object that talks Linux syscalls: the NativeAOT runtime, SDL3, Realm, SQLite, OpenSSL, FFmpeg, veldrid-spirv and musl libc. A libounce host program runs that object and answers its syscalls with the console's services: SD card files, sockets, threads, audio and input. Rendering uses Veldrid's Vulkan backend on OunceVK.
+The game runs as a custom Linux build compiled into a single native file using NativeAOT. It bundles everything (SDL3, SQLite, FFmpeg, .NET runtime, etc.) and talks directly to Linux system calls. A small host program on the console intercepts those system calls and maps them to the hardware (similar to translation layers like Wine or WSL 1). Graphics are handled using Veldrid's Vulkan backend running on OunceVK.
 
 ## Status
 
 Currently working:
   - All main gameplay features and screens like main menu, song select, gameplay, and results
-  - Various control schemes (controller, touchscreen, gyro, USB keyboard and mouse, **and Joy-Con 2 mouse mode**)
-  - Rendering through OunceVK at 60 or 120 Hz, at the console's resolution in handheld mode (1080p) and the TV output resolution when docked (up to 4K), switching live when you dock or undock
+  - Various control schemes:controller, touchscreen, gyro, USB keyboard and mouse, **and Joy-Con 2 mouse mode** (check [#Controls](#Controls))
+  - Renders at 60 or 120 Hz, at the console's resolution in handheld mode (1080p) and the TV output resolution when docked (up to 4K), and swaps automatically when you dock or undock
   - Low latency audio
   - Networking features: login, beatmap downloads, leaderboards, and dashboard
     - Note: as this is a custom build of the game and does not include the game's anti-cheat, score submission, multiplayer, spectating, and online status are all (and will always be) completely disabled
   - No garbage collections during gameplay to ensure best performance. There are still pauses of 100 to 500 ms outside gameplay (song select, map loading, leaving a map)
-  - A "Switch 2" section in osu!'s settings
+  - A "Switch 2" section in the in-game settings (see #)
   - Exiting game returns to hbmenu
 
 Not working yet:
   - Drawing tablets aren't supported, and cannot be with the current exploits we have ([source from r/switch2hacks Discord](https://discord.com/channels/1358947330115502186/1358948865469976596/1571770606716846183))
-
-The progress log is in `FEASIBILITY.md` and the hardware tests are in `TESTING.md`. Moving to a newer osu! release: `UPDATING.md`.
 
 ## Getting started
 
@@ -36,33 +34,42 @@ You need a Switch 2 running [kaiHEN](https://github.com/ouncebrew/kaihen): follo
 
 ### Binary release
 
-1. Download `ounsu-<version>.zip` from the [latest release](../../releases/latest). It holds the game (`switch/ounsu/ounsu.nro`) and osu!'s resources (`switch/ounsu/osu-resources/`).
+1. Download `ounsu-<version>.zip` from the [latest release](../../releases/latest).
 2. Extract it to the root of your SD card, merging its `switch` folder with the one already there. You can put the card in your PC, or use ounceshell's FTP server.
-3. Start hbmenu and choose **ounsu!**. The first start shows osu!'s first-run setup; your data (database, beatmaps, skins, settings) is created in `/switch/ounsu/osu/`.
+3. Start hbmenu and choose **ounsu!**.
+On your first boot, go through osu!'s first-run setup, and your data (database, beatmaps, skins, settings) is created in `/switch/ounsu/osu/`. You can also try moving data from a PC install of the game, though this is currently untested.
 
-To update, delete `/switch/ounsu/osu-resources/`, then extract the new zip the same way. Your osu! data isn't touched.
+To update, delete `/switch/ounsu/osu-resources/`, then extract the new zip the same way.
 
 ### From source
 
 You need Linux (x86_64), the [ounce-devkit](https://github.com/ouncebrew/ounce-devkit) (devkitPro with libounce and OunceVK), the .NET 10 SDK, Python 3, and cmake, ninja, make, perl, curl and unzip.
 
-1. **The musl toolchain.** Build the `aarch64-linux-musl` cross toolchain with its syscall patch and link it as `toolchain/` (commands in [`patches/musl.md`](patches/musl.md)).
-2. **The external sources.** `sh tools/fetch-sources.sh` checks out osu!, osu-framework, mysoundlib and the native libraries into `src/` at the commits in `patches/*.base` and applies `patches/*.diff` (several GB).
-3. **The native libraries.** `sh tools/build-native.sh` builds SDL3, SQLite, OpenSSL, FFmpeg, veldrid-spirv and Realm as static musl libraries (`src/native/*/build-lx`).
-4. **The CA bundle.** HTTPS needs a CA certificate bundle at `fsroot/usr/local/ssl/cert.pem`; the build puts it into the `.nro`. Your system's bundle works, e.g. `mkdir -p fsroot/usr/local/ssl && cp /etc/ssl/certs/ca-certificates.crt fsroot/usr/local/ssl/cert.pem`.
-5. **Build:**
-
+1. Build the `aarch64-linux-musl` cross toolchain with its syscall patch and link it as `toolchain/` (commands in [`patches/musl.md`](patches/musl.md)).
+2. Clone the external sources and apply their patches:
+    ```sh
+    sh tools/fetch-sources.sh
+    ```
+3. Build all the libraries as static musl libraries:
+    ```sh
+    sh tools/build-native.sh
+    ```
+4. HTTPS needs a CA certificate bundle at `fsroot/usr/local/ssl/cert.pem`; the build puts it into the `.nro`. Your system's bundle works, e.g.
+    ```sh
+    mkdir -p fsroot/usr/local/ssl
+    cp /etc/ssl/certs/ca-certificates.crt fsroot/usr/local/ssl/cert.pem
+    ```
+5. Build:
    ```sh
-   sh console/osu-game/build.sh   # full build (NativeAOT compile, about 15 minutes)
+   sh console/osu-game/build.sh   # full build (NativeAOT compile)
 
    # or
 
-   LX_SKIP_PUBLISH=1 sh console/osu-game/build.sh   # relink only, after changing the C side (about a minute)
+   LX_SKIP_PUBLISH=1 sh console/osu-game/build.sh   # relink only, after changing the C side
    ```
+   The result is in `console/osu-game/build/ounsu.nro`.
 
-   The result is `console/osu-game/build/ounsu.nro`.
-
-6. **Resources.** Extract osu!'s resources into loose files from the `ppy.osu.Game.Resources` NuGet package. The full build has already downloaded the version osu! uses, and these commands find it:
+6. Extract osu!'s resources into loose files from the `ppy.osu.Game.Resources` NuGet package. The full build has already downloaded the version osu! uses, use these commands to find it:
 
    ```sh
    R=$(sed -n 's/.*"ppy\.osu\.Game\.Resources" Version="\([^"]*\)".*/\1/p' src/osu/osu.Game/osu.Game.csproj)
@@ -71,11 +78,12 @@ You need Linux (x86_64), the [ounce-devkit](https://github.com/ouncebrew/ounce-d
        fsroot/osu-resources console/osu-game/osu-resources.substitutions.xml "$DLL"
    ```
 
-7. **Copy to the SD card:** `ounsu.nro` to `/switch/ounsu/ounsu.nro`, and `fsroot/osu-resources` to `/switch/ounsu/osu-resources/`. With ounceshell's FTP server running, `python3 tools/ftp-upload.py fsroot/osu-resources /switch/ounsu/osu-resources --host <console IP>` does the second part.
+7. Copy `ounsu.nro` to the SD card's `/switch/ounsu/ounsu.nro`, and `fsroot/osu-resources` to `/switch/ounsu/osu-resources/`. 
+   - With ounceshell's FTP server running, you can use `python3 tools/ftp-upload.py fsroot/osu-resources /switch/ounsu/osu-resources --host <console IP>` to copy over the resources.
 
-For development, hbmenu's netloader (press **Y**) and `nxlink -s -a <console IP> -p ounsu/ounsu.nro console/osu-game/build/ounsu.nro` send a build and show its log on the PC. The netloader saves the build it receives as `/switch/ounsu/ounsu.nro`.
+For development, open hbmenu's netloader (press **Y**) and use `nxlink -s -a <console IP> -p ounsu/ounsu.nro console/osu-game/build/ounsu.nro` send a build and show its log on the PC. The netloader saves the build it receives as `/switch/ounsu/ounsu.nro`.
 
-### What goes where on the SD card
+### SD Card Layout
 
 | Path | What |
 |---|---|
@@ -85,15 +93,7 @@ For development, hbmenu's netloader (press **Y**) and `nxlink -s -a <console IP>
 | `/switch/ounsu/import/` | Drop beatmaps, skins and replays here to import them (see below) |
 | `/switch/ounsu/lx-env` | Optional: extra environment variables, one `KEY=VALUE` per line. `LX_LOG_FILE=/lx-last.log` keeps a copy of the log on the card |
 
-`/switch/ounsu` is the game's file system root ("/"). The CA certificates for HTTPS are built into the `.nro`.
-
-## How it works
-
-osu! and osu-framework are compiled ahead of time with .NET NativeAOT for `linux-musl-arm64`. Everything the game needs (osu!, the NativeAOT runtime, SDL3, Realm, SQLite, OpenSSL, FFmpeg, veldrid-spirv, libstdc++ and musl libc) is linked into one relocatable object, the **island** (`tools/aot-island.py`, `tools/make-island.sh`). The island has no imports: its only export is `lx_island_main`, and it reaches the outside world only through a table of function pointers (`struct lx_host`, `lx/include/lx_abi.h`): Linux syscalls, thread creation, logging, Vulkan and the console's input, audio and display.
-
-The **host** (`lx/host`) is an ordinary libounce `.nro`. It implements the Linux syscalls the island makes on top of libnx: files on the SD card, memory, threads and futexes, sockets, epoll and DNS. It also gives the island OunceVK's Vulkan, reads the controllers, touchscreen, keyboard and mouse, and plays audio through audout. On exit it ends the island's threads, cleans up the Vulkan objects and frees the memory, so hbmenu comes back cleanly.
-
-`lx/dotnet` holds the NativeAOT-specific parts (delegate thunks, Vulkan glue). `console/osu-game/shim` is osu!'s side of the boundary: input turned into SDL events, low-latency audio output, GC tuning and stubs for BASS, which osu-framework references but this build doesn't use.
+`/switch/ounsu` is the game's file system root ("/").
 
 ## Controls
 
@@ -111,13 +111,13 @@ The **host** (`lx/host`) is an ordinary libounce `.nro`. It implements the Linux
 | Minus                       | F9                                                                                          |
 | D-pad                       | Arrow keys                                                                                  |
 | ZL / ZR                     | Z / X (osu!'s default hit keys)                                                             |
-| L / R                       | C / V (free keys: bind them in osu!'s settings)                                             |
-| L3 / R3 (stick clicks)      | A / S (free keys)                                                                           |
-| B (hold)                    | Gyro cursor: tilt and turn the controller to move the cursor. B sends nothing to osu!       |
+| L / R                       | C / V                                             |
+| L3 / R3 (stick clicks)      | A / S                                                                         |
+| B (hold)                    | Default bind for the gyro cursor: tilt and turn the controller to move the cursor. B sends nothing to osu! unless you change the bind in-game.       |
 | USB keyboard and mouse      | Work as on a PC (US keyboard layout)                                                        |
 | Joy-Con 2 mouse mode        | Slide a Joy-Con on a surface: it moves the cursor, L/ZL or R/ZR click, its stick scrolls    |
 
-The buttons send ordinary keyboard keys, so osu!'s key binding settings can use any of them. A Joy-Con lifted off the surface is an ordinary controller again.
+The buttons send ordinary keyboard keys, so osu!'s key binding settings can use any of them. If you have Joy-Con mouse mode enabled, it will act as an ordinary controller if you lift it off the surface.
 
 ## The "Switch 2" settings section
 
@@ -133,44 +133,18 @@ The buttons send ordinary keyboard keys, so osu!'s key binding settings can use 
 
 ## Importing files
 
-Beatmaps can be downloaded in-game once you're logged in. You can also put `.osz`/`.olz` beatmaps, `.osk` skins and `.osr` replays in `/switch/ounsu/import/` on the SD card, and osu! will import them at startup. You can also add them using ounceshell's FTP server, and osu! keeps checking for new files while it runs (disabled during gameplay). Imported beatmap archives are deleted as on desktop; skins and replays move to `imported/`, and files that failed to import to `failed/`.
-
-## Layout
-
-| Path | What |
-|---|---|
-| `console/osu-game/` | The osu! app: `Program.cs` (entry point, import folder, self-tests), `Switch2Settings.cs`, `GameplayGcSession.cs` (no GCs during gameplay), `HubSelfTest.cs`, `osu-game.csproj`, `build.sh`, `rd.xml`, `shim/` (input, audio output, GC, BASS stubs) |
-| `lx/host/` | The libounce host program: syscalls, files, memory, threads, networking, Vulkan, input, audio, display |
-| `lx/island/`, `lx/dotnet/`, `lx/include/` | The island's side of the boundary (musl hooks, NativeAOT thunks and Vulkan glue) and the shared ABI header |
-| `probes/` | Bring-up tests for the runtime, one per step: `hello-island` (a musl program on the host), `aot-hello` (NativeAOT), `vk-island` (Vulkan), `gfx-probe` (Veldrid), `net-probe` (sockets, DNS, TLS, HTTP, WebSocket), `hub-probe` (osu!'s metadata hub against a local server) |
-| `patches/` | The changes to the external projects, their base commits and notes (see below), and the musl toolchain recipe |
-| `tools/` | `fetch-sources.sh`, `build-native.sh` (+ `musl-toolchain.cmake`), `aot-island.py` and `make-island.sh` (island link), `capture-link.sh`, `gen-ssl-syms.py`, `gen-vk-tramp.py`, `scrub-paths.py`, `resource-extract` (osu-resources → loose files), `gen-rdxml` (rd.xml generator), `export-patches.sh`, `release.sh` + `gen-notices.py`, `ftp-upload.py`, `net-probe-server.py` |
-
-Not tracked (large, external or private): `src/` (the osu!, osu-framework, mysoundlib and native library checkouts),
-`toolchain/`, `fsroot/` (game resources and osu! data), build outputs.
-
-## External checkouts and patches
-
-| Patch | Checkout | Contents |
-|---|---|---|
-| `patches/osu.diff` | `src/osu` | build-date version stamp; `#if OUNSU` changes: AutoMapper-free Realm detach, loose-file resources, gameplay clock tweaks, metadata hub over a NativeAOT-safe protocol, two downloads at a time, notifications-connector null fix |
-| `patches/osu-framework.diff` | `src/osu-framework` | PR #6002 (SDL3 audio) merged; `#if OUNSU`: window size and refresh rate follow the host's display (resolution per console mode, 60/120 Hz), windowed-only mode, NativeAOT fixes, BASS stub fixes, 8 connections per server; `#if OUNSU_AUDIO`: SDL3 audio, FFmpeg.AutoGen 7.1.1 |
-| `patches/mysoundlib.diff` | `src/mysoundlib` | compiled into the app, no BASS/ASIO, 16-bit segmented track storage, mixer buffer fix |
-| `patches/realm-dotnet.diff` | `src/native/realm-dotnet` | static wrappers; realm-core under `OUNSU_ISLAND`: `File::MapBase::try_reserve` disabled, the generic commit helper wakes its listener |
-| `patches/veldrid-spirv.diff`, `patches/openssl.diff` | `src/native/...` | static build; OpenSSL reads the CPU features with `getauxval` |
-| `patches/SDL.diff`, `patches/ffmpeg.diff` | `src/native/...` | none (unmodified) |
-| `patches/musl-hbx-syscall-hooks.diff` | the musl toolchain | every syscall goes through a hook the island implements (`patches/musl.md`) |
-
-Each `patches/<name>.md` describes the changes; each `*.base` names the commit the patch applies to. Refresh the snapshots with `sh tools/export-patches.sh` before committing.
+Beatmaps can be downloaded in-game once you're logged in. You can also put `.osz`/`.olz` beatmaps, `.osk` skins and `.osr` replays in `/switch/ounsu/import/` on the SD card, and osu! will import them at startup. You can also add them using ounceshell's FTP server, and osu! keeps checking for new files while it runs (disabled during gameplay). Imported beatmap archives are deleted as on desktop, skins and replays move to `imported/`, and files that failed to import to `failed/`.
 
 ## Licence
 
-ounsu!'s own code is under the [MIT licence](LICENSE). Parts of `lx/host` are ported from HBLauncher's Linux runtime, and `patches/musl-hbx-syscall-hooks.diff` is HBLauncher's (MIT, RavensClawX and contributors; its notice is in `LICENSE` too). The other files in `patches/` change other projects and are under those projects' licences. Release zips also contain osu!'s resources (CC BY-NC 4.0, non-commercial use only) and libraries under their own licences, all listed in `THIRD_PARTY_NOTICES.txt` inside the zip.
+ounsu!'s own code is under the [MIT licence](LICENSE).
+
+Parts of `lx/host` are ported from HBLauncher's Linux runtime, and `patches/musl-hbx-syscall-hooks.diff` is HBLauncher's (MIT, RavensClawX and contributors; its notice is in `LICENSE` too). The other files in `patches/` change other projects and are under those projects' licences. Release zips also contain osu!'s resources (CC BY-NC 4.0, non-commercial use only) and libraries under their own licences, all listed in `THIRD_PARTY_NOTICES.txt` inside the zip.
 
 ## Credits
 
 **The game**
-- [osu!](https://github.com/ppy/osu) and [osu-framework](https://github.com/ppy/osu-framework) by ppy (Dean Herbert) and contributors (MIT). [osu-resources](https://github.com/ppy/osu-resources) (CC BY-NC 4.0) supply textures, sounds, fonts and the logo. Release zips include them unmodified, under that licence (not this repository's): non-commercial use only. osu! is a trademark of ppy Pty Ltd; this port isn't affiliated with or endorsed by ppy.
+- [osu!](https://github.com/ppy/osu) and [osu-framework](https://github.com/ppy/osu-framework) by peppy (Dean Herbert) and contributors (MIT). [osu-resources](https://github.com/ppy/osu-resources) (CC BY-NC 4.0) supply textures, sounds, fonts and the logo. Release zips include them unmodified under its licence.
 - [osu-framework PR #6002](https://github.com/ppy/osu-framework/pull/6002) (SDL3 audio backend) and [mysoundlib](https://github.com/hwsmm/mysoundlib) (LGPL-2.1) by hwsmm: the audio in this port.
 
 **Running code on the Switch 2**
@@ -187,4 +161,4 @@ ounsu!'s own code is under the [MIT licence](LICENSE). Parts of `lx/host` are po
 - [Newtonsoft.Json](https://github.com/JamesNK/Newtonsoft.Json) by James Newton-King (MIT) and [ImageSharp](https://github.com/SixLabors/ImageSharp) by Six Labors (Six Labors Split License).
 - [musl](https://musl.libc.org/) libc (MIT), built with [musl-cross-make](https://github.com/richfelker/musl-cross-make) by Rich Felker.
 
-Nintendo Switch 2 is a trademark of Nintendo, which is not affiliated with this project.
+Nintendo Switch 2 is a trademark of Nintendo. osu! and ppy are trademarks of ppy Pty Ltd.

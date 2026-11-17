@@ -4,12 +4,8 @@
 # release zips (dist/), captures and build outputs.
 /*
 !/.gitignore
-!/README.md
 !/LICENSE
-!/CLAUDE.md
-!/FEASIBILITY.md
-!/TESTING.md
-!/UPDATING.md
+!/*.md
 !/console/
 !/lx/
 !/probes/
