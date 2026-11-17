@@ -3,7 +3,7 @@
  *
  * - controllers: one PadState per Npad (No1..No8, Handheld). Buttons are ORed; each stick comes from the pad that
  *   pushes it furthest, so a centred handheld Joy-Con doesn't hide a Pro Controller's stick (HBLauncher finding).
- * - touch screen (1280x720 coordinates).
+ * - touch screen (1920x1080 coordinates).
  * - six-axis (LX_INPUT_GYRO): sensors of the handheld Joy-Cons, a Pro Controller and a Joy-Con pair on player 1,
  *   started on the first request; the one turning fastest wins.
  * - USB keyboard and mouse (LX_INPUT_KBMOUSE): initialised on the first request; mouse movement is summed over the
@@ -52,6 +52,7 @@ static void init(void) {
     for (int i = 0; i < NPADS; i++) {
         padInitializeWithMask(&g_pads[i], BITL(ids[i]));
     }
+    hidSetTouchScreenOutputRanges(1920, 1080);
     hidInitializeTouchScreen();
     g_ready = 1;
     lx_logf("lx-input: controllers and touch screen ready");

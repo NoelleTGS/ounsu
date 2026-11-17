@@ -63,8 +63,10 @@ void __wrap_SDL_PumpEvents(void);
 #define TOUCH_ID      ((SDL_TouchID)0x4C580001)
 #define MOUSE_ID      ((SDL_MouseID)1)
 #define KEYBOARD_ID   ((SDL_KeyboardID)1)
-#define HID_W         1280.0f /* touch screen and USB mouse coordinates */
+#define HID_W         1280.0f /* USB mouse coordinates */
 #define HID_H         720.0f
+#define TOUCH_W       1920.0f /* touch screen coordinates (lx_abi.h) */
+#define TOUCH_H       1080.0f
 #define POINTER_W     1920.0f /* the Joy-Con 2 mouse area (lx_input.c) */
 #define POINTER_H     1080.0f
 #define JOYMOUSE_HOLD_NS 750000000ull
@@ -235,8 +237,8 @@ static void touch(SDL_WindowID window, int width, int height) {
     for (i = 0; i < count; i++) {
         bool known = false;
         ids[i] = input.touch[i].id;
-        xs[i] = clampf((float)input.touch[i].x / (HID_W - 1.0f), 0.0f, 1.0f);
-        ys[i] = clampf((float)input.touch[i].y / (HID_H - 1.0f), 0.0f, 1.0f);
+        xs[i] = clampf((float)input.touch[i].x / (TOUCH_W - 1.0f), 0.0f, 1.0f);
+        ys[i] = clampf((float)input.touch[i].y / (TOUCH_H - 1.0f), 0.0f, 1.0f);
         for (j = 0; j < prev_count; j++) {
             if (prev_ids[j] == ids[i]) {
                 known = true;

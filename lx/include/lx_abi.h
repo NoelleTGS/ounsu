@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LX_ABI_VERSION 7
+#define LX_ABI_VERSION 8
 
 /* Private syscall numbers (above Linux's range), used by the island runtime only. */
 #define LX_SYS_UNMAPSELF 0x10000 /* (base, size): unmap the calling thread's stack and end the thread */
@@ -32,7 +32,7 @@ struct lx_input {
     int32_t stick_lx, stick_ly, stick_rx, stick_ry;     /* -32767..32767, +y up; per stick, the pad pushed furthest */
     uint32_t touch_count;
     struct {
-        uint32_t id, x, y;                              /* x, y in 1280x720 */
+        uint32_t id, x, y;                              /* x, y in 1920x1080 */
     } touch[LX_INPUT_MAX_TOUCH];
     float gyro[3];                                      /* angular velocity (turns/s) of the sensor turning fastest */
     uint32_t gyro_sensors;                              /* sensors started (0: none or not requested) */
