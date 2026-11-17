@@ -1,6 +1,6 @@
 # osu! (`src/osu`)
 
-Upstream: [ppy/osu](https://github.com/ppy/osu), base commit in `osu.base` (`169c020824`, tag `2026.1115.0-lazer`). Patch:
+Upstream: [ppy/osu](https://github.com/ppy/osu), base commit in `osu.base` (`078f5a2263`, tag `2026.1117.0-lazer`). Patch:
 `osu.diff`. `src/osu` is the modified checkout the build uses.
 
 Every change sits behind `#if OUNSU` (or one of the finer `OUNSU_*` defines), which `console/osu-game/build.sh` turns on with
@@ -60,6 +60,6 @@ Score submission is refused by ppy's server for self-built clients. That's by de
 ## Restoring
 
 ```sh
-git -C src/osu checkout -f 169c0208248cf562a7c75a7a431e51c0e3dac0a1
+git -C src/osu checkout -f 078f5a226368e62fd2974f8eb167303b41d71cab
 git -C src/osu apply --whitespace=nowarn patches/osu.diff
 ```

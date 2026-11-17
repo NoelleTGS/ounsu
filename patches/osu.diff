@@ -645,10 +645,10 @@ index 7064906be4..5d4b3ea0a7 100644
              if (!hasBeenCancelled)
                  await Task.Run(connect, CancellationToken.None).ConfigureAwait(false);
 diff --git a/osu.Game/OsuGameBase.cs b/osu.Game/OsuGameBase.cs
-index 25fa587d34..c73e63f965 100644
+index 6119640b2c..65d3f75c8f 100644
 --- a/osu.Game/OsuGameBase.cs
 +++ b/osu.Game/OsuGameBase.cs
-@@ -278,7 +278,12 @@ private void load(ReadableKeyCombinationProvider keyCombinationProvider, Framewo
+@@ -281,7 +281,12 @@ private void load(ReadableKeyCombinationProvider keyCombinationProvider, Framewo
                  VersionHash = $"{Version}-{RuntimeInfo.OS}".ComputeMD5Hash();
              }
  
@@ -776,7 +776,7 @@ index a4cd356339..76efd565f1 100644
              if (bindableWithValueType == null)
                  return;
 diff --git a/osu.Game/osu.Game.csproj b/osu.Game/osu.Game.csproj
-index c8bb583280..4d6ba122d4 100644
+index 91a13c3859..4d6ba122d4 100644
 --- a/osu.Game/osu.Game.csproj
 +++ b/osu.Game/osu.Game.csproj
 @@ -17,6 +17,18 @@
@@ -802,7 +802,7 @@ index c8bb583280..4d6ba122d4 100644
        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
      </PackageReference>
      <PackageReference Include="Realm" Version="20.1.0"/>
--    <PackageReference Include="ppy.osu.Framework" Version="2026.1114.0"/>
+-    <PackageReference Include="ppy.osu.Framework" Version="2026.1117.0"/>
      <PackageReference Include="ppy.osu.Game.Resources" Version="2026.1112.1"/>
      <PackageReference Include="Sentry" Version="6.11.0"/>
      <PackageReference Include="SharpCompress" Version="0.50.4"/>

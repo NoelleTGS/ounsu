@@ -28,7 +28,7 @@ zips `dist/ounsu-<version>.zip`, then tags, pushes the tag and creates a **draft
 `tools/scrub-paths.py` on island.o: `$HOME` in strings becomes `/build//...` (same length), so no home paths ship.
 WiiCompiled-Switch2 is GPLv3: never copy code from it (none is in this repo; checked 2026-11-15).
 
-**osu! version (2026-11-15):** `src/osu` is on `2026.1115.0-lazer`, `src/osu-framework` on `2026.1114.0`, resources
+**osu! version (2026-11-17):** `src/osu` is on `2026.1117.0-lazer`, `src/osu-framework` on `2026.1117.0`, resources
 `2026.1112.1` (`patches/*.base`; how to move on: `UPDATING.md`). `~/osu` is only the untouched reference checkout.
 
 Goal: run osu! lazer (C#/.NET, ~/osu) as **homebrew (.nro) under kaiHEN改変** on a jailbroken Switch 2: launched

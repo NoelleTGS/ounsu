@@ -1,6 +1,6 @@
 # osu-framework (`src/osu-framework`)
 
-Upstream: [ppy/osu-framework](https://github.com/ppy/osu-framework), tag `2026.1114.0` (`osu-framework.base`). Patch:
+Upstream: [ppy/osu-framework](https://github.com/ppy/osu-framework), tag `2026.1117.0` (`osu-framework.base`). Patch:
 `osu-framework.diff`. `src/osu` references this checkout instead of the NuGet package.
 
 ## 1. PR #6002 merged (SDL3 audio)
@@ -39,6 +39,6 @@ points it binds are implemented in `console/osu-game/shim/lx_osu.c`.
 ## Restoring
 
 ```sh
-git -C src/osu-framework checkout -f ff1ae763ae01a0e8b0efb2fc32f7b9f7c283c800
+git -C src/osu-framework checkout -f 932a5529e34eb8a0f993d51f3c3d501faf921055
 git -C src/osu-framework apply --whitespace=nowarn patches/osu-framework.diff
 ```
