@@ -36,7 +36,7 @@ You need a Switch 2 running [kaiHEN](https://github.com/ouncebrew/kaihen): follo
 
 ### Binary release
 
-1. Download `ounsu-<version>.zip` from the [latest release](../../releases/latest). It holds the game (`switch/ounsu.nro`) and osu!'s resources (`switch/ounsu/osu-resources/`).
+1. Download `ounsu-<version>.zip` from the [latest release](../../releases/latest). It holds the game (`switch/ounsu/ounsu.nro`) and osu!'s resources (`switch/ounsu/osu-resources/`).
 2. Extract it to the root of your SD card, merging its `switch` folder with the one already there. You can put the card in your PC, or use ounceshell's FTP server.
 3. Start hbmenu and choose **ounsu!**. The first start shows osu!'s first-run setup; your data (database, beatmaps, skins, settings) is created in `/switch/ounsu/osu/`.
 
@@ -71,15 +71,15 @@ You need Linux (x86_64), the [ounce-devkit](https://github.com/ouncebrew/ounce-d
        fsroot/osu-resources console/osu-game/osu-resources.substitutions.xml "$DLL"
    ```
 
-7. **Copy to the SD card:** `ounsu.nro` to `/switch/ounsu.nro`, and `fsroot/osu-resources` to `/switch/ounsu/osu-resources/`. With ounceshell's FTP server running, `python3 tools/ftp-upload.py fsroot/osu-resources /switch/ounsu/osu-resources --host <console IP>` does the second part.
+7. **Copy to the SD card:** `ounsu.nro` to `/switch/ounsu/ounsu.nro`, and `fsroot/osu-resources` to `/switch/ounsu/osu-resources/`. With ounceshell's FTP server running, `python3 tools/ftp-upload.py fsroot/osu-resources /switch/ounsu/osu-resources --host <console IP>` does the second part.
 
-For development, hbmenu's netloader (press **Y**) and `nxlink -s -a <console IP> console/osu-game/build/ounsu.nro` send a build and show its log on the PC. The netloader saves the build it receives as `/switch/ounsu.nro`.
+For development, hbmenu's netloader (press **Y**) and `nxlink -s -a <console IP> -p ounsu/ounsu.nro console/osu-game/build/ounsu.nro` send a build and show its log on the PC. The netloader saves the build it receives as `/switch/ounsu/ounsu.nro`.
 
 ### What goes where on the SD card
 
 | Path | What |
 |---|---|
-| `/switch/ounsu.nro` | The game |
+| `/switch/ounsu/ounsu.nro` | The game |
 | `/switch/ounsu/osu-resources/` | osu!'s resources (from the release zip, or extracted with `tools/resource-extract`) |
 | `/switch/ounsu/osu/` | osu!'s data folder (created on first start: database, beatmaps, skins, settings) |
 | `/switch/ounsu/import/` | Drop beatmaps, skins and replays here to import them (see below) |

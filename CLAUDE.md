@@ -33,7 +33,7 @@ WiiCompiled-Switch2 is GPLv3: never copy code from it (none is in this repo; che
 
 Goal: run osu! lazer (C#/.NET, ~/osu) as **homebrew (.nro) under kaiHEN改変** on a jailbroken Switch 2: launched
 from hbmenu, running entirely off the console and its SD card once started (no PC tether, no file server).
-Releases (user's decision, 2026-11-14): a zip of the SD layout, `switch/ounsu.nro` + `switch/ounsu/osu-resources/`
+Releases (user's decision, 2026-11-14): a zip of the SD layout, `switch/ounsu/ounsu.nro` + `switch/ounsu/osu-resources/`
 (osu-resources unmodified, CC BY-NC 4.0, credited in the README). The repo itself never tracks game data.
 
 This project is a **port of the working HBLauncher version** (`~/osu-HBLauncher`, still intact, at `c11053a`). There,
@@ -75,7 +75,7 @@ default**; nxlink is only a development log channel. Never design features aroun
   - **Phase 4 in progress (2026-11-14): osu! renders and takes input** (runs 5-10, FEASIBILITY.md 2026-11-14): Realm
     opens, first-run setup and main menu on screen at 60 fps, and every input works (pad, touch, gyro, USB keyboard/
     mouse, **Joy-Con 2 mouse** via libounce PadPointer; `lx/host/lx_input.c` + `console/osu-game/shim/lx_input.c`,
-    ABI 4). hbmenu's netloader saves each sent .nro as `sdmc:/switch/ounsu.nro`; launching that from hbmenu runs the
+    ABI 4). hbmenu's netloader saves each sent .nro as `sdmc:/switch/ounsu/ounsu.nro`; launching that from hbmenu runs the
     PREVIOUS build. **Next, in order:**
     Also done 2026-11-14: **audio** (ABI 5, `lx/host/lx_audio.c` + `shim/lx_audio_out.c`: no crackles, almost no
     latency), the pressure-GC downgrade (`shim/lx_gc.c`), and a **clean exit back to hbmenu** (run 14).
@@ -94,9 +94,9 @@ default**; nxlink is only a development log channel. Never design features aroun
        interface (firmware RE). FEASIBILITY.md 2026-11-14 has the details.
     2. Not important to the user yet: HOME menu / sleep / close-from-HOME handling.
   - **Workflow:** `sh console/osu-game/build.sh` (~15 min, ILC) or `LX_SKIP_PUBLISH=1 sh console/osu-game/build.sh`
-    (relink, ~70 s). Claude sends builds itself so the log can be read: `nxlink -s -a 192.168.1.177 <nro> >
-    logs/<name>.log 2>&1` in the background (the user puts hbmenu in netloader mode with Y), plus a Monitor on the log.
-    nxlink is not on PATH: use `/opt/devkitpro/tools/bin/nxlink`. A previous nxlink still running holds the stdio
+    (relink, ~70 s). Claude sends builds itself so the log can be read: `nxlink -s -a 192.168.1.177 -p ounsu/ounsu.nro
+    <nro> > logs/<name>.log 2>&1` in the background (the user puts hbmenu in netloader mode with Y), plus a Monitor on the log.
+  nxlink is not on PATH: use `/opt/devkitpro/tools/bin/nxlink`. A previous nxlink still running holds the stdio
     port ("bind listen socket: Address already in use": the game runs without a log): kill it before sending. nxlink
     prints "exiting ..." whenever the connection drops (crash, exit, or the user undocking, which cuts the ethernet);
     a crash shows no `lx: program exited` line. `LX_LOG_FILE=/lx-last.log` in lx-env copies the log to the card

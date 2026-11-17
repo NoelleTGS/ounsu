@@ -6,7 +6,7 @@
 #
 # Uses the last build (console/osu-game/build: ounsu.nro + ounsu.release, written by build.sh). The zip, extracted to
 # the SD card's root, gives:
-#   switch/ounsu.nro
+#   switch/ounsu/ounsu.nro
 #   switch/ounsu/osu-resources/            extracted fresh from the ppy.osu.Game.Resources package osu! references
 #   switch/ounsu/LICENSE.txt               this repository's LICENSE
 #   switch/ounsu/THIRD_PARTY_NOTICES.txt   tools/gen-notices.py
@@ -65,7 +65,7 @@ cmp -s "$STAGE/substitutions.xml" console/osu-game/osu-resources.substitutions.x
     die "the resources package doesn't match console/osu-game/osu-resources.substitutions.xml: see UPDATING.md (resources)"
 rm "$STAGE/substitutions.xml"
 
-cp "$BUILD/ounsu.nro" "$STAGE/switch/ounsu.nro"
+cp "$BUILD/ounsu.nro" "$STAGE/switch/ounsu/ounsu.nro"
 cp LICENSE "$STAGE/switch/ounsu/LICENSE.txt"
 python3 tools/gen-notices.py "$STAGE/switch/ounsu/THIRD_PARTY_NOTICES.txt"
 (cd "$STAGE" && zip -q -r -X "../ounsu-$VERSION.zip" switch)
