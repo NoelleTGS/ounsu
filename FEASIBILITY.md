@@ -421,3 +421,23 @@ Tablet: Wacom CTL-671 (056a:0301) with a custom high-polling-rate firmware. Open
   /api/v2/notifications` answered HTTP 500 `{"error":null}` on every attempt (it worked under HBLauncher), so the
   notification websocket kept retrying with upstream's backoff. Nothing in this update changes that request; the user
   saw no visible effect. Watch it on the next runs.
+
+## 2026-11-17: USB tablets, second look (ouncemtp, libounce #2, probes/usbhs-probe run 1)
+
+- **Everything working on USB so far is `usb:ds` (console as a USB device), not `usb:hs` (host).** ouncemtp
+  (github.com/venustrikes/ouncemtp, ISC, an MTP server), libounce issue #2 and kaihen#12 (usbComms) all found the same:
+  `usb:ds` keeps Switch 1 11.0.0+'s two-step open (root cmd 0, no arguments → service object, then BindDevice on it),
+  the IDsService and IDsEndpoint commands are unchanged, and only IDsInterface was renumbered (AppendConfigurationData
+  10 → 6; cmd 5 now returns 2293-0605, which breaks libnx's `usbDsRegisterInterface`). Errors are module 293. It shows
+  the usb sysmodule serves kaiHEN homebrew through the same sm proxy, so nothing about `usb:hs` points to a
+  permission problem.
+- **Another crash from a wider request loop:** kaihen#12's RegisterInterface loop crashed the console past index 23
+  (2162-0002), like our run 8. The usb sysmodule falls over on some out-of-range requests.
+- **`usb:hs` doesn't have that two-step open.** Our first probe never sent an argument-free cmd 0 (its CMIF scans
+  all sent the pid). usbhs-probe run 1: smGetService and ConvertToDomain ok, then **root cmd 0 with no arguments →
+  0xF601** like everything before. No crash. Together with 2026-11-14, these simple shapes are now all closed: cmd 0 with
+  a process handle (pseudo or real, domain or not), cmd 0 without arguments, ids 0-63 with a pid (± process handle,
+  ± u64 pid), unbound cmd 3 / 6, and TIPC ids 0-31.
+- **Status: still parked.** What's left would be guessing layouts on a service that can crash the console. The way
+  forward is unchanged: the real Switch 2 `usb:hs` interface from firmware RE, or from someone in the scene who
+  maps it (worth asking the people behind ouncemtp / libounce #2 whether anyone has looked at host mode).
